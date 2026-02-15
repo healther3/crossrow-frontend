@@ -8,9 +8,9 @@ body {
   /* 核心背景：模拟蓝天白云的渐变 */
   background: radial-gradient(
           circle at 50% 30%,
-          #ffffff 0%,       /* 中心亮白 */
-          #e6f7ff 40%,      /* 中间淡蓝 */
-          #b3e0ff 100%      /* 边缘深一点的蓝 */
+          #a2c0c8 0%,       /* 中心亮白 */
+          #b2dcef 40%,      /* 中间淡蓝 */
+          #5999c1 100%      /* 边缘深一点的蓝 */
   );
 
   min-height: 100vh;

@@ -1,57 +1,38 @@
-// src/components/Navbar.jsx
 import React, { useState } from 'react';
+import { User, LogIn } from 'lucide-react';
 
 export default function Navbar() {
-    // 3. 简单的状态模拟：false 代表未登录，true 代表已登录
-    // 后续这里会替换为读取 localStorage 或全局状态
     const [isLoggedIn, setIsLoggedIn] = useState(false);
 
-    // 模拟登录/登出的处理函数
     const handleAuthClick = () => {
-        if (isLoggedIn) {
-            // 如果已登录，点击跳转到用户中心（此处暂仅打印）
-            console.log("跳转至用户中心");
-        } else {
-            // 如果未登录，执行登录逻辑
-            setIsLoggedIn(true); // 暂时模拟点击即登录
-            console.log("跳转至登录页");
-        }
+        setIsLoggedIn(!isLoggedIn);
     };
 
     return (
-        <nav className="fixed top-0 left-0 right-0 z-50">
-            {/* 视觉容器：
-         1. h-12: 高度固定，类似 Apple 导航栏的高度
-         2. bg-white/70: 白色背景，70% 不透明度
-         3. backdrop-blur-md: 关键的磨砂玻璃效果
-         4. border-b: 底部一条细微的分界线
-      */}
-            <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-                <div className="flex h-12 items-center justify-between border-b border-gray-200/50 bg-white/70 backdrop-blur-md shadow-sm rounded-b-lg">
+        // changed: z-50 确保在最顶层，bg-slate-900/80 实现深色磨砂
+        <nav className="fixed top-0 left-0 w-full z-50 border-b border-white/10 bg-slate-200/100 backdrop-blur-md shadow-lg transition-all duration-300">
+            <div className="mx-auto w-full px-6 lg:px-12">
+                <div className="flex h-16 items-center justify-between">
 
-                    {/* 左侧：登录/用户中心区域 */}
-                    <div className="flex items-center">
+                    {/* 左侧：Logo 或 品牌名 (可选，目前留空或放个小的 Home 图标) */}
+                    <div className="flex-shrink-0">
+                        {/* 如果需要 logo 可以放这里 */}
+                    </div>
+
+                    {/* 右侧：功能区 (只保留登录/用户中心) */}
+                    <div className="flex items-center gap-4">
                         <button
                             onClick={handleAuthClick}
-                            className="text-xs font-medium text-gray-600 hover:text-black transition-colors duration-300 px-3 py-1 rounded-md hover:bg-gray-100/50"
+                            className="group relative inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-200 transition-all duration-300 hover:text-white rounded-full hover:bg-white/10"
                         >
-                            {/* 根据状态动态显示文字 */}
-                            {isLoggedIn ? '用户中心' : '登录'}
+                            {/* 这里的文字会在登录状态改变 */}
+                            <span>{isLoggedIn ? '用户中心' : '登录'}</span>
+
+                            {/* 下划线动画 */}
+                            <span className="absolute bottom-1 left-4 right-4 h-[1px] scale-x-0 bg-blue-400 transition-transform duration-300 group-hover:scale-x-100" />
                         </button>
                     </div>
 
-                    {/* 中间/右侧：装饰性菜单 (模拟 Apple 那个长长的菜单项，为了视觉平衡) */}
-                    <div className="hidden md:flex space-x-8 text-[11px] font-normal text-gray-500">
-                        {/* 这些是不可点击的装饰，模仿原图的布局感 */}
-                        <span className="cursor-default hover:text-gray-900 transition-colors">Store</span>
-                        <span className="cursor-default hover:text-gray-900 transition-colors">Mac</span>
-                        <span className="cursor-default hover:text-gray-900 transition-colors">iPad</span>
-                        <span className="cursor-default hover:text-gray-900 transition-colors">iPhone</span>
-                        <span className="cursor-default hover:text-gray-900 transition-colors">Support</span>
-                    </div>
-
-                    {/* 右侧占位，保持 Flex 平衡，或者放搜索图标 */}
-                    <div className="w-8"></div>
                 </div>
             </div>
         </nav>
