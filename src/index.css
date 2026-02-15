@@ -16,3 +16,39 @@ body {
   min-height: 100vh;
   overflow: hidden; /* 防止出现不必要的滚动条 */
 }
+
+.vn-title-container {
+    position: relative;
+    display: inline-block;
+    font-family: "Times New Roman", Times, serif; /* 强制使用衬线体 */
+    line-height: 1; /* 防止行高影响对齐 */
+}
+
+/* 顶层：渐变文字 */
+.vn-title-fill {
+    position: relative;
+    z-index: 10; /* 在最上层 */
+
+    /* 天空渐变色：深蓝 -> 青蓝 -> 纯白 */
+    background: linear-gradient(180deg, #003366 0%, #0077b6 50%, #ffffff 90%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+}
+
+/* 底层：白色描边 + 阴影 */
+.vn-title-stroke {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0; /* 在下层 */
+
+    /* 技巧：用 text-stroke 生成粗描边 */
+    -webkit-text-stroke: 12px white; /* 描边宽度，根据字号调整 */
+    color: white; /* 描边颜色 */
+
+    /* 给白色描边加一个淡淡的阴影，增加立体感 */
+    filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.2));
+}
