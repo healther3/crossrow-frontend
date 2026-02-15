@@ -2,14 +2,17 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { generateUUID, getUserId } from '../utils/uuid';
 
+// 打字机速度配置
+const TYPE_SPEED_MS = 30;
+const CHARS_PER_TICK = 3;
 
 export default function ChatPage() {
     const navigate = useNavigate();
     const bottomRef = useRef(null);
     const [input, setInput] = useState('');
+    const [isSending, setIsSending] = useState(false);
 
-    // temporary ids
-    const [userId] = useState(getUserId());
+    const userId = "admin";
     const [chatId] = useState(generateUUID());
 
     const [messages, setMessages] = useState([
@@ -18,52 +21,121 @@ export default function ChatPage() {
         { id: 3, text: "The noise of the world fades away here.", sender: "ai" },
     ]);
 
+    // --- 打字机核心状态 ---
+    const targetTextRef = useRef("");
+    const displayedIndexRef = useRef(0);
+    const currentMsgIdRef = useRef(null);
+
+    // --- 使用 Map 存储每个 step 的内容，确保顺序和去重 ---
+    const stepContentsRef = useRef(new Map());
+
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
 
-    const handleSend = (e) => {
-        if (e.key === 'Enter' && input.trim()) {
-            const userMsg = { id: Date.now(), text: input, sender: "user" };
-            setMessages(prev => [...prev, userMsg]);
-            setInput('');
+    // --- 打字机引擎 ---
+    useEffect(() => {
+        const timer = setInterval(() => {
+            if (currentMsgIdRef.current && displayedIndexRef.current < targetTextRef.current.length) {
+                const nextIndex = Math.min(
+                    displayedIndexRef.current + CHARS_PER_TICK,
+                    targetTextRef.current.length
+                );
 
-            // 1. 先把用户的消息显示在界面上
-            const userMsgId = Date.now();
-            setMessages(prev => [...prev, { id: userMsgId, text: userText, sender: "user" }]);
+                // 直接截取目标文本的前 nextIndex 个字符作为显示内容
+                const displayText = targetTextRef.current.slice(0, nextIndex);
 
-            // 2. 创建一个空的 AI 消息占位符，准备接收数据
-            const aiMsgId = userMsgId + 1;
-            setMessages(prev => [...prev, { id: aiMsgId, text: "", sender: "ai" }]);
-
-            // 3. 构建后端请求 URL
-            const url = `http://localhost:8123/api/crossrow/agent/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}`;
-
-            // 4. 建立 EventSource 连接 (这是处理 Server-Sent Events 的标准 API)
-            const eventSource = new EventSource(url);
-
-            // 监听消息事件 (后端每发送一个字符/片段，这里就会触发一次)
-            eventSource.onmessage = (event) => {
-                // 后端传回来的数据在 event.data 中
-                const newData = event.data;
-                // 更新 UI：找到最后那条 AI 消息，把新数据追加上去
                 setMessages(prev => {
                     const newMessages = [...prev];
-                    const lastMsgIndex = newMessages.findIndex(m => m.id === aiMsgId);
-                    if (lastMsgIndex !== -1) {
-                        // 注意：这里需要处理换行符，如果后端传回的是特定格式
-                        // 简单文本流直接追加即可
-                        newMessages[lastMsgIndex].text += newData;
+                    const targetIndex = newMessages.findIndex(m => m.id === currentMsgIdRef.current);
+                    if (targetIndex !== -1) {
+                        // 直接设置，而不是追加，避免重复
+                        newMessages[targetIndex] = {
+                            ...newMessages[targetIndex],
+                            text: displayText
+                        };
                     }
                     return newMessages;
                 });
-            };
 
-// 监听错误或结束
+                displayedIndexRef.current = nextIndex;
+            }
+        }, TYPE_SPEED_MS);
+
+        return () => clearInterval(timer);
+    }, []);
+
+    // --- 重建目标文本（按 step 顺序）---
+    const rebuildTargetText = () => {
+        const sortedSteps = Array.from(stepContentsRef.current.entries())
+            .sort((a, b) => a[0] - b[0]); // 按 step ID 排序
+
+        targetTextRef.current = sortedSteps
+            .map(([_, content]) => content)
+            .join("\n\n");
+    };
+
+    const handleSend = (e) => {
+        if (e.key === 'Enter' && input.trim() && !isSending && !e.nativeEvent.isComposing) {
+            setIsSending(true);
+            const userText = input.trim();
+            setInput('');
+
+            const userMsgId = Date.now();
+            const aiMsgId = userMsgId + 1;
+
+            // 重置状态
+            currentMsgIdRef.current = aiMsgId;
+            targetTextRef.current = "";
+            displayedIndexRef.current = 0;
+            stepContentsRef.current.clear();
+
+            setMessages(prev => [
+                ...prev,
+                { id: userMsgId, text: userText, sender: "user" },
+                { id: aiMsgId, text: "", sender: "ai" }
+            ]);
+
+            const url = `http://localhost:8123/api/crossrow/agent/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}`;
+            const eventSource = new EventSource(url);
+
+            // --- 处理 step 事件 ---
+            eventSource.addEventListener("step", (event) => {
+                const stepId = parseInt(event.lastEventId, 10);
+                let rawData = event.data;
+
+                // 数据清洗
+                if (rawData.startsWith('"') && rawData.endsWith('"')) {
+                    try { rawData = JSON.parse(rawData); } catch(e) {}
+                }
+
+                // 使用 Map 存储，自动去重（相同 stepId 会覆盖）
+                if (!isNaN(stepId)) {
+                    stepContentsRef.current.set(stepId, rawData);
+                    rebuildTargetText();
+                }
+            });
+
+            // --- 处理 complete 事件 ---
+            eventSource.addEventListener("complete", (event) => {
+                let rawData = event.data;
+
+                if (rawData.startsWith('"') && rawData.endsWith('"')) {
+                    try { rawData = JSON.parse(rawData); } catch(e) {}
+                }
+
+                // complete 使用一个特殊的大 ID 确保排在最后
+                const completeId = 999999;
+                if (!stepContentsRef.current.has(completeId)) {
+                    stepContentsRef.current.set(completeId, rawData);
+                    rebuildTargetText();
+                }
+            });
+
             eventSource.onerror = (err) => {
-                // SSE 的特性是连接关闭也会触发 error，所以这里通常意味着流结束了
-                console.log("Stream ended or error occurred");
-                eventSource.close(); // 务必关闭连接，否则浏览器会尝试自动重连
+                console.log("Stream ended");
+                eventSource.close();
+                setIsSending(false);
             };
         }
     };
@@ -97,17 +169,18 @@ export default function ChatPage() {
 
                 <div className="mt-4 pt-4 border-t border-white/10 w-full">
                     <div className="flex items-center w-full">
-            <span className="text-lg md:text-xl text-white/50 vn-text-shadow mr-2 font-bold">
-              &gt;
-            </span>
+                        <span className="text-lg md:text-xl text-white/50 vn-text-shadow mr-2 font-bold">
+                            &gt;
+                        </span>
                         <input
                             type="text"
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
                             onKeyDown={handleSend}
                             autoFocus
-                            className="flex-1 w-full bg-transparent border-none outline-none text-lg md:text-xl text-white vn-text-shadow placeholder-white/20 font-vn leading-snug tracking-tight caret-transparent cursor-blink"
-                            placeholder=""
+                            disabled={isSending}
+                            className={`flex-1 w-full bg-transparent border-none outline-none text-lg md:text-xl text-white vn-text-shadow placeholder-white/20 font-vn leading-snug tracking-tight caret-transparent cursor-blink ${isSending ? 'opacity-50' : ''}`}
+                            placeholder={isSending ? "Processing..." : ""}
                             autoComplete="off"
                         />
                     </div>
