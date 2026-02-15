@@ -52,3 +52,36 @@ body {
     /* 给白色描边加一个淡淡的阴影，增加立体感 */
     filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.2));
 }
+
+/* 1. 复古游戏字体栈 */
+.font-vn {
+    /* 优先使用 MS Mincho (日系游戏标配) 或 Courier (打字机风格) */
+    font-family: "MS Mincho", "Hiragino Mincho ProN", "Courier New", Courier, "Times New Roman", serif;
+    letter-spacing: 0.05em; /* 字间距稍微宽一点，更有呼吸感 */
+    line-height: 1.8; /* 行高要大，便于阅读 */
+}
+
+/* 2. 强烈的文字描边 (关键！让白字在亮背景上也看得清) */
+.vn-text-shadow {
+    color: #ffffff; /* 字体纯白 */
+    /* 模拟 1px 的硬黑边，而不是模糊的阴影 */
+    text-shadow:
+            -1px -1px 0 #000,
+            1px -1px 0 #000,
+            -1px  1px 0 #000,
+            1px  1px 0 #000,
+            2px  2px 4px rgba(0,0,0,0.5); /* 再加一点点柔和阴影增加立体感 */
+}
+
+/* 3. 输入框的复古光标动画 */
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+}
+.cursor-blink::after {
+    content: '▋';
+    margin-left: 4px;
+    animation: blink 1s step-end infinite;
+    color: #fff;
+    text-shadow: 1px 1px 0 #000;
+}

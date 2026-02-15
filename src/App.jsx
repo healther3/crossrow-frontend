@@ -10,6 +10,8 @@ import ChatPage from './pages/ChatPage'; // 引入新页面
 function Home() {
     return (
         <div className="flex flex-col items-center justify-center min-h-screen z-10 relative pointer-events-none">
+            <InteractiveCanvas />
+            <Navbar/>
 
             {/* 1. 标题区域
          mb-12: 给下方按钮留出空间
@@ -58,9 +60,6 @@ function App() {
             <div className="relative min-h-screen text-gray-800 font-sans selection:bg-blue-200 selection:text-blue-900 overflow-hidden">
                 {/* 全局背景组件：即使切换页面，如果想保留背景，放在 Routes 外面 */}
                 <Background />
-                <InteractiveCanvas />
-                <Navbar />
-
                 {/* 路由配置 */}
                 <Routes>
                     <Route path="/" element={<Home />} />
