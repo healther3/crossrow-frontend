@@ -1,10 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { generateUUID, getUserId } from '../utils/uuid';
+
 
 export default function ChatPage() {
     const navigate = useNavigate();
     const bottomRef = useRef(null);
     const [input, setInput] = useState('');
+
+    // temporary ids
+    const [userId] = useState(getUserId());
+    const [chatId] = useState(generateUUID());
 
     const [messages, setMessages] = useState([
         { id: 1, text: "Wait... where am I?", sender: "user" },
@@ -22,22 +28,50 @@ export default function ChatPage() {
             setMessages(prev => [...prev, userMsg]);
             setInput('');
 
-            setTimeout(() => {
-                setMessages(prev => [...prev, {
-                    id: Date.now() + 1,
-                    text: "I am listening. Tell me what burdens your mind.",
-                    sender: "ai"
-                }]);
-            }, 1000);
+            // 1. 先把用户的消息显示在界面上
+            const userMsgId = Date.now();
+            setMessages(prev => [...prev, { id: userMsgId, text: userText, sender: "user" }]);
+
+            // 2. 创建一个空的 AI 消息占位符，准备接收数据
+            const aiMsgId = userMsgId + 1;
+            setMessages(prev => [...prev, { id: aiMsgId, text: "", sender: "ai" }]);
+
+            // 3. 构建后端请求 URL
+            const url = `http://localhost:8123/api/crossrow/agent/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}`;
+
+            // 4. 建立 EventSource 连接 (这是处理 Server-Sent Events 的标准 API)
+            const eventSource = new EventSource(url);
+
+            // 监听消息事件 (后端每发送一个字符/片段，这里就会触发一次)
+            eventSource.onmessage = (event) => {
+                // 后端传回来的数据在 event.data 中
+                const newData = event.data;
+                // 更新 UI：找到最后那条 AI 消息，把新数据追加上去
+                setMessages(prev => {
+                    const newMessages = [...prev];
+                    const lastMsgIndex = newMessages.findIndex(m => m.id === aiMsgId);
+                    if (lastMsgIndex !== -1) {
+                        // 注意：这里需要处理换行符，如果后端传回的是特定格式
+                        // 简单文本流直接追加即可
+                        newMessages[lastMsgIndex].text += newData;
+                    }
+                    return newMessages;
+                });
+            };
+
+// 监听错误或结束
+            eventSource.onerror = (err) => {
+                // SSE 的特性是连接关闭也会触发 error，所以这里通常意味着流结束了
+                console.log("Stream ended or error occurred");
+                eventSource.close(); // 务必关闭连接，否则浏览器会尝试自动重连
+            };
         }
     };
 
     return (
         <div className="relative min-h-screen font-vn overflow-hidden flex flex-col">
-            {/* 1. 蒙版：稍微加深一点，配合紧凑的白字，对比度更高 */}
             <div className="absolute inset-0 z-0 bg-slate-900/70 backdrop-blur-[1px]" />
 
-            {/* 2. 退出按钮 */}
             <button
                 onClick={() => navigate('/')}
                 className="fixed top-6 right-8 z-50 text-white/40 hover:text-white vn-text-shadow text-sm transition-colors cursor-pointer"
@@ -45,25 +79,12 @@ export default function ChatPage() {
                 [ Return ]
             </button>
 
-            {/* 3. 主要内容容器
-         - max-w-5xl mx-auto: 让内容块在屏幕中间，但保留较宽的阅读区域
-         - px-8 md:px-16: 左右留白，让文字块看起来更“聚气”
-      */}
             <div className="relative z-10 flex flex-col w-full max-w-5xl mx-auto h-screen px-8 md:px-16 py-12">
-
-                {/* 聊天记录区域 */}
                 <div className="flex-1 overflow-y-auto no-scrollbar pb-8">
-                    {/* space-y-6: 这里的间距就是你要求的“空行表达人物转化” */}
                     <div className="flex flex-col space-y-6">
                         {messages.map((msg) => (
                             <div key={msg.id} className="animate-fade-in w-full text-left">
-                                {/* 排版调整：
-                   - text-lg md:text-xl: 字体变小，更精致
-                   - leading-snug: 行距变紧
-                   - tracking-tight: 字距变紧
-                   - vn-text-shadow: 保持硬黑边，确保清晰
-                */}
-                                <p className={`text-lg md:text-xl leading-none tracking-tight vn-text-shadow break-words ${
+                                <p className={`text-lg md:text-xl leading-snug tracking-tight vn-text-shadow break-words whitespace-pre-wrap ${
                                     msg.sender === 'user' ? 'text-cyan-200' : 'text-white'
                                 }`}>
                                     {msg.text}
@@ -74,14 +95,11 @@ export default function ChatPage() {
                     </div>
                 </div>
 
-                {/* 4. 底部输入区域 */}
                 <div className="mt-4 pt-4 border-t border-white/10 w-full">
                     <div className="flex items-center w-full">
-                        {/* 提示符也相应变小 */}
-                        <span className="text-lg md:text-xl text-white/50 vn-text-shadow mr-2 font-bold">
+            <span className="text-lg md:text-xl text-white/50 vn-text-shadow mr-2 font-bold">
               &gt;
             </span>
-
                         <input
                             type="text"
                             value={input}
@@ -94,7 +112,6 @@ export default function ChatPage() {
                         />
                     </div>
                 </div>
-
             </div>
         </div>
     );
