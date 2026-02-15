@@ -30,7 +30,7 @@ body {
     z-index: 10; /* 在最上层 */
 
     /* 天空渐变色：深蓝 -> 青蓝 -> 纯白 */
-    background: linear-gradient(180deg, #003366 0%, #0077b6 50%, #ffffff 90%);
+    background: linear-gradient(180deg, #010d1e 0%, rgba(0, 48, 244, 0.75) 50%, #5db4d8 90%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
