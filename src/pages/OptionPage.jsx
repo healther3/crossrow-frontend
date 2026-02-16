@@ -1,23 +1,57 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
-import Background from '../components/Background';
 import { useSettings } from '../context/SettingsContext';
+
+// 一个复用的“Start风格”选项按钮组件
+const OptionButton = ({ label, isSelected, onClick, size = "text-1xl" }) => {
+    return (
+        <button
+            onClick={onClick}
+            className="group relative px-8 py-2 overflow-hidden transition-all duration-300 hover:scale-105 cursor-pointer"
+        >
+            {/* 文字：选中时常亮蓝色，未选中时灰色但悬停变蓝 */}
+            <span
+                className={`relative z-10 font-serif ${size} transition-colors duration-300 
+                ${isSelected ? 'text-blue-600 font-bold' : 'text-slate-400 group-hover:text-blue-500'}`}
+            >
+                {label}
+            </span>
+
+            {/* 左箭头：选中时常驻，未选中时悬停出现 */}
+            <span
+                className={`absolute left-0 top-1/2 -translate-y-1/2 -translate-x-full transition-all duration-300 text-blue-400 font-serif text-xl
+                ${isSelected ? 'translate-x-2 opacity-100' : 'opacity-0 group-hover:translate-x-2 group-hover:opacity-100'}`}
+            >
+                ▶
+            </span>
+
+            {/* 右箭头 */}
+            <span
+                className={`absolute right-0 top-1/2 -translate-y-1/2 translate-x-full transition-all duration-300 text-blue-400 font-serif text-xl
+                ${isSelected ? '-translate-x-2 opacity-100' : 'opacity-0 group-hover:-translate-x-2 group-hover:opacity-100'}`}
+            >
+                ◀
+            </span>
+        </button>
+    );
+};
 
 export default function OptionsPage() {
     const navigate = useNavigate();
     const { bgConfig, updateMode, updateCoords } = useSettings();
-    const [tempMode, setTempMode] = useState(bgConfig.mode); // 临时状态，点OK才保存
-    const [locationStatus, setLocationStatus] = useState(''); // 提示信息
 
-    // 处理地理位置获取
+    // 临时状态
+    const [tempMode, setTempMode] = useState(bgConfig.mode);
+    const [locationStatus, setLocationStatus] = useState('');
+
     const handleLocationRequest = () => {
         if (!navigator.geolocation) {
-            setLocationStatus("Error: Geolocation not supported");
+            setLocationStatus("System Error: Geolocation unavailable.");
             return;
         }
 
-        setLocationStatus("Locating...");
+        setLocationStatus("Acquiring signal...");
 
         navigator.geolocation.getCurrentPosition(
             (position) => {
@@ -25,99 +59,89 @@ export default function OptionsPage() {
                     lat: position.coords.latitude,
                     lng: position.coords.longitude
                 };
-                updateCoords(coords); // 获取成功直接存入 context (因为坐标是客观事实)
-                setTempMode('USER');  // 选中 USER 模式
-                setLocationStatus("Coordinates acquired.");
+                updateCoords(coords);
+                setTempMode('USER');
+                setLocationStatus("Coordinates confirmed.");
             },
             (error) => {
                 console.error(error);
-                setLocationStatus("Location denied. Defaulting to RANDOM.");
-                setTempMode('RANDOM'); // 失败则回退到随机
+                setLocationStatus("Signal lost. Defaulting to Random.");
+                setTempMode('RANDOM');
             }
         );
     };
 
     const handleSave = () => {
         updateMode(tempMode);
-        navigate('/'); // 返回主页
+        navigate('/');
     };
 
     return (
         <div className="relative min-h-screen font-serif overflow-hidden flex items-center justify-center">
-            <Background />
+            {/* 背景组件不需要在这里重复引入，App.jsx 已经是全局背景了，这里只需要画 UI */}
+            {/* 如果想让 Option 页背景稍微暗一点以突出白色卡片，可以加个遮罩 */}
+            <div className="absolute inset-0 bg-white/20 backdrop-blur-sm z-0" />
+
             <Navbar />
 
-            {/* 复古设置面板容器 */}
-            <div className="relative z-10 w-full max-w-4xl p-1">
-                {/* 顶部标题栏装饰 */}
-                <div className="mb-4 ml-4">
-                    <div className="inline-block bg-gradient-to-r from-slate-200 to-transparent px-8 py-1 rounded-l-full border-l-4 border-blue-800">
-                        <span className="text-3xl font-bold text-slate-800 tracking-widest uppercase" style={{ textShadow: '1px 1px 0 #fff' }}>
-                            Options
-                        </span>
-                    </div>
-                </div>
+            {/* 白色打底的主容器 */}
+            <div className="relative z-10 w-full max-w-3xl px-6">
+                <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl p-12 md:p-16 transform transition-all duration-500">
 
-                {/* 蓝色半透明主面板 */}
-                <div className="bg-gradient-to-b from-[#4a7a9e]/90 to-[#2c4e6e]/90 backdrop-blur-md rounded-2xl border-2 border-white/30 shadow-[0_0_20px_rgba(0,0,0,0.5)] p-8 md:p-12 text-white">
+                    {/* 标题 */}
+                    <h2 className="text-2xl md:text-2xl font-bold mb-5 tracking-wider vn-title-container">
+                        Config
+                    </h2>
+                    {/* 选项组：背景源 */}
+                    <div className="mb-1">
+                        <p className="text-slate-500 uppercase tracking-[0.2em]">
+                            - Background Source -
+                        </p>
 
-                    <div className="space-y-8">
-                        {/* 选项行：Background Settings */}
-                        <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-white/10 pb-6">
-                            <div className="text-2xl font-bold drop-shadow-md mb-4 md:mb-0">
-                                • Background Source
-                            </div>
+                        <div className="flex md:flex-row">
+                            {/* 选项 1: Random */}
+                            <OptionButton
+                                label="Random"
+                                isSelected={tempMode === 'RANDOM'}
+                                onClick={() => {
+                                    setTempMode('RANDOM');
+                                    setLocationStatus('');
+                                }}
+                            />
 
-                            <div className="flex gap-8 text-xl">
-                                {/* Random 选项 */}
-                                <button
-                                    onClick={() => setTempMode('RANDOM')}
-                                    className="group flex items-center gap-3 hover:text-cyan-200 transition-colors cursor-pointer"
-                                >
-                                    {/* 模拟复选框 */}
-                                    <div className={`w-5 h-5 border-2 border-white flex items-center justify-center ${tempMode === 'RANDOM' ? 'bg-white' : ''}`}>
-                                        {tempMode === 'RANDOM' && <div className="w-3 h-3 bg-blue-900" />}
-                                    </div>
-                                    <span className={tempMode === 'RANDOM' ? "font-bold text-white" : "text-white/70"}>
-                                        Random
-                                    </span>
-                                </button>
-
-                                {/* User Local 选项 */}
-                                <button
-                                    onClick={handleLocationRequest}
-                                    className="group flex items-center gap-3 hover:text-cyan-200 transition-colors cursor-pointer"
-                                >
-                                    <div className={`w-5 h-5 border-2 border-white flex items-center justify-center ${tempMode === 'USER' ? 'bg-white' : ''}`}>
-                                        {tempMode === 'USER' && <div className="w-3 h-3 bg-blue-900" />}
-                                    </div>
-                                    <span className={tempMode === 'USER' ? "font-bold text-white" : "text-white/70"}>
-                                        Local (GPS)
-                                    </span>
-                                </button>
-                            </div>
+                            {/* 选项 2: Local */}
+                            <OptionButton
+                                label="Local (GPS)"
+                                isSelected={tempMode === 'USER'}
+                                onClick={handleLocationRequest}
+                            />
                         </div>
 
-                        {/* 状态显示区域 (类似游戏底部的提示栏) */}
-                        <div className="h-8 text-center text-cyan-200 font-sans text-sm tracking-wide">
-                            {locationStatus && `[System]: ${locationStatus}`}
+                        {/* 状态提示文字 */}
+                        <div className="h-8 mt-4 flex">
+                            <span className={`text-sm font-sans tracking-wide transition-opacity duration-300 ${locationStatus ? 'opacity-100 text-blue-500' : 'opacity-0'}`}>
+                                {locationStatus || "Ready"}
+                            </span>
                         </div>
                     </div>
 
-                    {/* 底部按钮栏 */}
-                    <div className="mt-12 flex justify-end gap-6 border-t border-white/20 pt-6">
-                        <button
+                    {/* 底部操作栏 */}
+                    <div className="flex justify-center gap-12 mt-12 pt-8 border-t border-slate-100">
+                        {/* 确认按钮 */}
+                        <OptionButton
+                            label="Confirm"
+                            isSelected={false} // 操作按钮不需要常亮选中态
+                            size="text-xl"
                             onClick={handleSave}
-                            className="px-8 py-2 bg-slate-800/50 hover:bg-slate-700/80 border border-white/20 rounded shadow-lg transition-all text-xl font-bold tracking-widest hover:scale-105 active:scale-95"
-                        >
-                            OK
-                        </button>
-                        <button
+                        />
+
+                        {/* 取消按钮 */}
+                        <OptionButton
+                            label="Cancel"
+                            isSelected={false}
+                            size="text-xl"
                             onClick={() => navigate('/')}
-                            className="px-8 py-2 hover:bg-white/10 border border-transparent hover:border-white/20 rounded transition-all text-xl tracking-widest text-white/70 hover:text-white"
-                        >
-                            CANCEL
-                        </button>
+                        />
                     </div>
 
                 </div>
