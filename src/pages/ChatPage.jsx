@@ -1,19 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+// 1. 之前遗留的未使用引用已清理
 import { generateUUID, getUserId } from '../utils/uuid';
 import { useSettings } from '../context/SettingsContext';
+import { useTransition } from '../context/TransitionContext';
 
 // 打字机速度配置
 const TYPE_SPEED_MS = 30;
 const CHARS_PER_TICK = 3;
 
 export default function ChatPage() {
-    const navigate = useNavigate();
+    const { navigateWithTransition } = useTransition();
     const bottomRef = useRef(null);
     const [input, setInput] = useState('');
     const [isSending, setIsSending] = useState(false);
 
-    // 1. 获取全局配置 (从 OptionsPage 传来的)
+    // 1. 获取全局配置
     const { bgConfig } = useSettings();
 
     // ID 管理
@@ -34,51 +35,72 @@ export default function ChatPage() {
     // --- 使用 Map 存储每个 step 的内容，确保顺序和去重 ---
     const stepContentsRef = useRef(new Map());
 
+    // 2. 引用 EventSource 以便组件卸载时关闭它
+    const eventSourceRef = useRef(null);
+
     // --- 背景图状态 ---
     const [bgUrl, setBgUrl] = useState(null);
 
-    // 2. 异步获取背景图 URL (适配你的后端返回 String 的情况)
+    // 3. 异步获取背景图 URL (修复鉴权问题)
     useEffect(() => {
         const fetchBackgroundUrl = async () => {
             try {
-                // 你的后端接口地址
                 const baseUrl = "http://localhost:8123/api/crossrow/image/background";
                 const params = new URLSearchParams();
 
-                // 确定模式: 如果 context 里没值，默认 RANDOM
-                const mode = bgConfig?.mode === 'USER' ? 'USER' : 'RANDOM';
+                // --- 修复点 1：必须携带 userId，否则后端 SimpleAuthAdvisor 会拦截报 403 ---
+                params.append("userId", userId);
+
+                // --- 修复点 2：智能回退逻辑 ---
+                let mode = bgConfig?.mode === 'USER' ? 'USER' : 'RANDOM';
+
+                // 如果是 USER 模式但没有坐标数据，强制降级为 RANDOM，防止后端报错
+                if (mode === 'USER' && (!bgConfig?.coords || !bgConfig.coords.lat)) {
+                    console.warn("[FrontEnd] User mode selected but no coords found. Falling back to RANDOM.");
+                    mode = 'RANDOM';
+                }
+
                 params.append("mode", mode);
 
-                // 如果是 USER 模式且有坐标，传给后端
                 if (mode === 'USER' && bgConfig?.coords) {
                     params.append("lat", bgConfig.coords.lat);
                     params.append("lng", bgConfig.coords.lng);
                 }
 
-                // 发起请求拿到 URL 字符串
+                console.log(`[FrontEnd] Fetching background... Mode: ${mode}, User: ${userId}`);
+
                 const response = await fetch(`${baseUrl}?${params.toString()}`);
 
                 if (response.ok) {
-                    const urlString = await response.text(); // 后端返回的是纯文本 URL
-                    console.log("Got background URL:", urlString);
-                    // 只有当返回了有效 URL 时才更新
+                    const urlString = await response.text();
+                    // 简单的 URL 校验
                     if (urlString && urlString.startsWith('http')) {
                         setBgUrl(urlString);
                     }
                 } else {
-                    console.error("Failed to fetch background URL");
+                    console.error("[FrontEnd] Failed to fetch background URL. Status:", response.status);
                 }
             } catch (error) {
-                console.error("Error fetching background:", error);
+                console.error("[FrontEnd] Error fetching background:", error);
             }
         };
 
         fetchBackgroundUrl();
-    }, [bgConfig]); // 当 bgConfig 变化时（比如用户改了设置），重新获取
+    }, [bgConfig]); // 当配置变化时重新获取
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
+
+    // 4. 组件卸载时的清理逻辑
+    useEffect(() => {
+        return () => {
+            if (eventSourceRef.current) {
+                console.log("Closing EventSource on unmount");
+                eventSourceRef.current.close();
+            }
+        };
+    }, []);
 
     // --- 打字机引擎 ---
     useEffect(() => {
@@ -135,6 +157,11 @@ export default function ChatPage() {
             displayedIndexRef.current = 0;
             stepContentsRef.current.clear();
 
+            // 发送前先关闭可能存在的旧连接
+            if (eventSourceRef.current) {
+                eventSourceRef.current.close();
+            }
+
             setMessages(prev => [
                 ...prev,
                 { id: userMsgId, text: userText, sender: "user" },
@@ -143,6 +170,8 @@ export default function ChatPage() {
 
             const url = `http://localhost:8123/api/crossrow/agent/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}`;
             const eventSource = new EventSource(url);
+
+            eventSourceRef.current = eventSource;
 
             eventSource.addEventListener("step", (event) => {
                 const stepId = event.lastEventId ? parseInt(event.lastEventId, 10) : Date.now();
@@ -175,6 +204,7 @@ export default function ChatPage() {
                 console.log("Stream ended");
                 eventSource.close();
                 setIsSending(false);
+                eventSourceRef.current = null;
             };
         }
     };
@@ -184,24 +214,23 @@ export default function ChatPage() {
 
             {/* --- 背景图渲染层 --- */}
             <div className="absolute inset-0 z-0 bg-slate-900">
-                {/* 1. 图片层：使用 object-cover 铺满 */}
                 {bgUrl && (
                     <img
                         src={bgUrl}
                         alt="Background"
                         className="w-full h-full object-cover opacity-60 filter brightness-75 contrast-125 transition-opacity duration-1000 animate-fade-in"
                         onError={(e) => {
-                            e.target.style.display = 'none'; // 加载失败时隐藏
+                            e.target.style.display = 'none';
+                            console.warn("Background image failed to load");
                         }}
                     />
                 )}
-
-                {/* 2. 蒙版层：保留之前的 backdrop-blur，但叠加在图片上 */}
+                {/* 蒙版层：保证文字清晰度 */}
                 <div className="absolute inset-0 bg-gradient-to-b from-slate-900/60 via-slate-900/40 to-slate-900/90 backdrop-blur-[1px]" />
             </div>
 
             <button
-                onClick={() => navigate('/')}
+                onClick={() => navigateWithTransition('/')}
                 className="fixed top-6 right-8 z-50 text-white/40 hover:text-white vn-text-shadow text-sm transition-colors cursor-pointer"
             >
                 [ Return ]

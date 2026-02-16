@@ -4,13 +4,16 @@ import Navbar from './components/Navbar';
 import Background from './components/Background';
 import InteractiveCanvas from './components/InteractiveCanvas';
 import ChatPage from './pages/ChatPage';
-import OptionsPage from './pages/OptionPage';
+import OptionsPage from './pages/OptionPage'; // 1. 引用名保持 OptionsPage
 import { SettingsProvider } from './context/SettingsContext';
+import { TransitionProvider, useTransition } from './context/TransitionContext';
 
 function Home() {
+    const { navigateWithTransition } = useTransition();
+
     return (
         <div className="flex flex-col items-center justify-center min-h-screen z-10 relative pointer-events-none">
-            <InteractiveCanvas />
+            {/* 移除这里的 InteractiveCanvas，移到下方 AppRoutes 全局显示 */}
             <Navbar />
 
             {/* Title */}
@@ -27,35 +30,41 @@ function Home() {
             <div className="pointer-events-auto flex flex-col items-center gap-8">
 
                 {/* 1. Start Button */}
-                <Link
-                    to="/chat"
-                    className="group relative px-12 py-3 overflow-hidden rounded-full transition-all duration-300 hover:scale-110"
+                <button
+                    onClick={() => navigateWithTransition('/chat')}
+                    className="group relative px-12 py-3 overflow-hidden rounded-full transition-all duration-300 hover:scale-110 cursor-pointer"
                 >
-                    <span className="relative z-10 font-serif text-1xl md:text-2xl text-slate-600 group-hover:text-blue-600 transition-colors duration-300">
+                    {/* 修正：text-1xl -> text-xl */}
+                    <span
+                        className="relative z-10 font-serif text-xl md:text-2xl text-slate-600 group-hover:text-blue-600 transition-colors duration-300">
                         Start
                     </span>
-                    {/* 左箭头 */}
-                    <span className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-full opacity-0 transition-all duration-300 group-hover:translate-x-4 group-hover:opacity-100 text-blue-400 font-serif text-2xl md:text-3xl">▶</span>
-                    {/* 右箭头 */}
-                    <span className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-full opacity-0 transition-all duration-300 group-hover:-translate-x-4 group-hover:opacity-100 text-blue-400 font-serif text-2xl md:text-3xl">◀</span>
-                </Link>
+                    <span
+                        className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-full opacity-0 transition-all duration-300 group-hover:translate-x-4 group-hover:opacity-100 text-blue-400 font-serif text-2xl md:text-3xl">▶</span>
+                    <span
+                        className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-full opacity-0 transition-all duration-300 group-hover:-translate-x-4 group-hover:opacity-100 text-blue-400 font-serif text-2xl md:text-3xl">◀</span>
+                </button>
 
-                {/* 2. Config Button (现在和 Start 风格完全一致) */}
-                <Link
-                    to="/options"
-                    className="group relative px-12 py-3 overflow-hidden rounded-full transition-all duration-300 hover:scale-110"
+                {/* 2. Config Button */}
+                <button
+                    onClick={() => navigateWithTransition('/options')}
+                    className="group relative px-12 py-3 overflow-hidden rounded-full transition-all duration-300 hover:scale-110 cursor-pointer"
                 >
-                    <span className="relative z-10 font-serif text-2xl md:text-2xl text-slate-500 group-hover:text-blue-500 transition-colors duration-300">
+                    <span
+                        className="relative z-10 font-serif text-2xl md:text-2xl text-slate-500 group-hover:text-blue-500 transition-colors duration-300">
                         Config
                     </span>
-                    {/* 复用箭头动画 */}
-                    <span className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-full opacity-0 transition-all duration-300 group-hover:translate-x-4 group-hover:opacity-100 text-blue-400 font-serif text-xl md:text-2xl">▶</span>
-                    <span className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-full opacity-0 transition-all duration-300 group-hover:-translate-x-4 group-hover:opacity-100 text-blue-400 font-serif text-xl md:text-2xl">◀</span>
-                </Link>
+                    <span
+                        className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-full opacity-0 transition-all duration-300 group-hover:translate-x-4 group-hover:opacity-100 text-blue-400 font-serif text-xl md:text-2xl">▶</span>
+                    <span
+                        className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-full opacity-0 transition-all duration-300 group-hover:-translate-x-4 group-hover:opacity-100 text-blue-400 font-serif text-xl md:text-2xl">◀</span>
+                </button>
 
                 {/* 3. Exit Button */}
-                <button className="group relative px-10 py-2 overflow-hidden rounded-full transition-all duration-300 hover:scale-105 cursor-default">
-                     <span className="font-serif text-xl md:text-2xl text-slate-400 group-hover:text-slate-600 transition-colors">
+                <button
+                    className="group relative px-10 py-2 overflow-hidden rounded-full transition-all duration-300 hover:scale-105 cursor-default">
+                     <span
+                         className="font-serif text-xl md:text-2xl text-slate-400 group-hover:text-slate-600 transition-colors">
                         Exit
                     </span>
                 </button>
@@ -64,18 +73,30 @@ function Home() {
     );
 }
 
+function AppRoutes() {
+    return (
+        <div className="relative min-h-screen text-gray-800 font-sans selection:bg-blue-200 selection:text-blue-900 overflow-hidden">
+            <Background/>
+            {/* 建议：将流体光标放在这里，作为全局特效 */}
+            <InteractiveCanvas />
+
+            <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/chat" element={<ChatPage />} />
+                {/* 修正：这里使用 import 进来的 OptionsPage */}
+                <Route path="/options" element={<OptionsPage />} />
+            </Routes>
+        </div>
+    );
+}
+
 function App() {
     return (
         <SettingsProvider>
             <BrowserRouter>
-                <div className="relative min-h-screen text-gray-800 font-sans selection:bg-blue-200 selection:text-blue-900 overflow-hidden">
-                    <Background />
-                    <Routes>
-                        <Route path="/" element={<Home />} />
-                        <Route path="/chat" element={<ChatPage />} />
-                        <Route path="/options" element={<OptionsPage />} />
-                    </Routes>
-                </div>
+                <TransitionProvider>
+                    <AppRoutes/>
+                </TransitionProvider>
             </BrowserRouter>
         </SettingsProvider>
     );

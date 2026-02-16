@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import { useSettings } from '../context/SettingsContext';
+import { useTransition } from '../context/TransitionContext';
 
 // 一个复用的“Start风格”选项按钮组件
 const OptionButton = ({ label, isSelected, onClick, size = "text-1xl" }) => {
@@ -38,7 +39,8 @@ const OptionButton = ({ label, isSelected, onClick, size = "text-1xl" }) => {
 };
 
 export default function OptionsPage() {
-    const navigate = useNavigate();
+    //const navigate = useNavigate();
+    const { navigateWithTransition } = useTransition(); // 使用 Transition
     const { bgConfig, updateMode, updateCoords } = useSettings();
 
     // 临时状态
@@ -73,8 +75,8 @@ export default function OptionsPage() {
 
     const handleSave = () => {
         updateMode(tempMode);
-        navigate('/');
-    };
+        navigateWithTransition('/'); // 带动画跳转回主页
+   };
 
     return (
         <div className="relative min-h-screen font-serif overflow-hidden flex items-center justify-center">
