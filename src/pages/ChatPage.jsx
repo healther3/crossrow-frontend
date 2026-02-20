@@ -41,20 +41,20 @@ export default function ChatPage() {
     // --- 背景图状态 ---
     const [bgUrl, setBgUrl] = useState(null);
 
-    // 3. 异步获取背景图 URL (修复鉴权问题)
+    // 3. 异步获取背景图 URL
     useEffect(() => {
         const fetchBackgroundUrl = async () => {
             try {
+                // 你的后端接口地址
                 const baseUrl = "http://localhost:8123/api/crossrow/image/background";
                 const params = new URLSearchParams();
 
-                // --- 修复点 1：必须携带 userId，否则后端 SimpleAuthAdvisor 会拦截报 403 ---
                 params.append("userId", userId);
 
-                // --- 修复点 2：智能回退逻辑 ---
-                let mode = bgConfig?.mode === 'USER' ? 'USER' : 'RANDOM';
+                // --- 修改点：不再过滤非USER模式，直接取 bgConfig.mode ---
+                let mode = bgConfig?.mode || 'RANDOM';
 
-                // 如果是 USER 模式但没有坐标数据，强制降级为 RANDOM，防止后端报错
+                // 唯一需要干预的情况：选了 USER 但没拿坐标，强制降级防报错
                 if (mode === 'USER' && (!bgConfig?.coords || !bgConfig.coords.lat)) {
                     console.warn("[FrontEnd] User mode selected but no coords found. Falling back to RANDOM.");
                     mode = 'RANDOM';
@@ -62,6 +62,7 @@ export default function ChatPage() {
 
                 params.append("mode", mode);
 
+                // 如果是 USER 模式且有坐标，传给后端
                 if (mode === 'USER' && bgConfig?.coords) {
                     params.append("lat", bgConfig.coords.lat);
                     params.append("lng", bgConfig.coords.lng);
@@ -73,7 +74,7 @@ export default function ChatPage() {
 
                 if (response.ok) {
                     const urlString = await response.text();
-                    // 简单的 URL 校验
+                    console.log("[FrontEnd] Got background URL:", urlString);
                     if (urlString && urlString.startsWith('http')) {
                         setBgUrl(urlString);
                     }
@@ -86,7 +87,7 @@ export default function ChatPage() {
         };
 
         fetchBackgroundUrl();
-    }, [bgConfig]); // 当配置变化时重新获取
+    }, [bgConfig]);
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -214,18 +215,20 @@ export default function ChatPage() {
 
             {/* --- 背景图渲染层 --- */}
             <div className="absolute inset-0 z-0 bg-slate-900">
+                {/* 1. 图片层：使用 object-cover 铺满 */}
                 {bgUrl && (
                     <img
                         src={bgUrl}
                         alt="Background"
                         className="w-full h-full object-cover opacity-60 filter brightness-75 contrast-125 transition-opacity duration-1000 animate-fade-in"
                         onError={(e) => {
-                            e.target.style.display = 'none';
+                            e.target.style.display = 'none'; // 加载失败时隐藏
                             console.warn("Background image failed to load");
                         }}
                     />
                 )}
-                {/* 蒙版层：保证文字清晰度 */}
+
+                {/* 2. 蒙版层：保留之前的 backdrop-blur，但叠加在图片上 */}
                 <div className="absolute inset-0 bg-gradient-to-b from-slate-900/60 via-slate-900/40 to-slate-900/90 backdrop-blur-[1px]" />
             </div>
 

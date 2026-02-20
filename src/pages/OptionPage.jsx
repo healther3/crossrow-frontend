@@ -4,7 +4,7 @@ import Navbar from '../components/Navbar';
 import { useSettings } from '../context/SettingsContext';
 import { useTransition } from '../context/TransitionContext';
 
-// 一个复用的“Start风格”选项按钮组件
+// 一个复用的“Start风格”选项按钮组件 (完全保留你的样式设定)
 const OptionButton = ({ label, isSelected, onClick, size = "text-1xl" }) => {
     return (
         <button
@@ -38,12 +38,11 @@ const OptionButton = ({ label, isSelected, onClick, size = "text-1xl" }) => {
     );
 };
 
-export default function OptionsPage() {
-    //const navigate = useNavigate();
-    const { navigateWithTransition } = useTransition(); // 使用 Transition
+export default function OptionPage() {
+    const navigate = useNavigate();
+    const { navigateWithTransition } = useTransition();
     const { bgConfig, updateMode, updateCoords } = useSettings();
 
-    // 临时状态
     const [tempMode, setTempMode] = useState(bgConfig.mode);
     const [locationStatus, setLocationStatus] = useState('');
 
@@ -75,43 +74,47 @@ export default function OptionsPage() {
 
     const handleSave = () => {
         updateMode(tempMode);
-        navigateWithTransition('/'); // 带动画跳转回主页
-   };
+        // 使用你的原生跳转逻辑，也可以换成 navigateWithTransition('/')
+        if (navigateWithTransition) {
+            navigateWithTransition('/');
+        } else {
+            navigate('/');
+        }
+    };
+
+    // 新增：快速选择主题，清空 GPS 提示
+    const selectTheme = (mode) => {
+        setTempMode(mode);
+        setLocationStatus('');
+    };
 
     return (
         <div className="relative min-h-screen font-serif overflow-hidden flex items-center justify-center">
-            {/* 背景组件不需要在这里重复引入，App.jsx 已经是全局背景了，这里只需要画 UI */}
-            {/* 如果想让 Option 页背景稍微暗一点以突出白色卡片，可以加个遮罩 */}
             <div className="absolute inset-0 bg-white/20 backdrop-blur-sm z-0" />
 
             <Navbar />
 
-            {/* 白色打底的主容器 */}
-            <div className="relative z-10 w-full max-w-3xl px-6">
-                <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl p-12 md:p-16 transform transition-all duration-500">
+            <div className="relative z-10 w-full max-w-4xl px-6">
+                <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl p-12 md:p-16 text-center transform transition-all duration-500">
 
-                    {/* 标题 */}
-                    <h2 className="text-2xl md:text-2xl font-bold mb-5 tracking-wider vn-title-container">
-                        Config
+                    <h2 className="text-4xl md:text-5xl font-bold text-slate-700 mb-12 tracking-wider vn-title-container">
+                        Configuration
                     </h2>
-                    {/* 选项组：背景源 */}
-                    <div className="mb-1">
-                        <p className="text-slate-500 uppercase tracking-[0.2em]">
+
+                    <div className="mb-12">
+                        <p className="text-slate-400 text-lg mb-6 uppercase tracking-[0.2em]">
                             - Background Source -
                         </p>
 
-                        <div className="flex md:flex-row">
-                            {/* 选项 1: Random */}
-                            <OptionButton
-                                label="Random"
-                                isSelected={tempMode === 'RANDOM'}
-                                onClick={() => {
-                                    setTempMode('RANDOM');
-                                    setLocationStatus('');
-                                }}
-                            />
+                        {/* 这里的布局只加上了 flex-wrap 和微调的 gap，其余都是你的原始设计 */}
+                        <div className="flex flex-wrap justify-center items-center gap-4 md:gap-8">
+                            <OptionButton label="Random" isSelected={tempMode === 'RANDOM'} onClick={() => selectTheme('RANDOM')} />
+                            <OptionButton label="Nature" isSelected={tempMode === 'NATURE'} onClick={() => selectTheme('NATURE')} />
+                            <OptionButton label="Urban" isSelected={tempMode === 'URBAN'} onClick={() => selectTheme('URBAN')} />
+                            <OptionButton label="Landmark" isSelected={tempMode === 'LANDMARK'} onClick={() => selectTheme('LANDMARK')} />
 
-                            {/* 选项 2: Local */}
+                            <div className="hidden md:block w-px h-8 bg-slate-300/50" />
+
                             <OptionButton
                                 label="Local (GPS)"
                                 isSelected={tempMode === 'USER'}
@@ -120,7 +123,7 @@ export default function OptionsPage() {
                         </div>
 
                         {/* 状态提示文字 */}
-                        <div className="h-8 mt-4 flex">
+                        <div className="h-8 mt-4 flex items-center justify-center">
                             <span className={`text-sm font-sans tracking-wide transition-opacity duration-300 ${locationStatus ? 'opacity-100 text-blue-500' : 'opacity-0'}`}>
                                 {locationStatus || "Ready"}
                             </span>
