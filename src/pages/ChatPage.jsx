@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { generateUUID, getUserId } from '../utils/uuid';
 import { useSettings } from '../context/SettingsContext';
 import { useTransition } from '../context/TransitionContext';
+import { useAuth } from '../context/AuthContext';
 
 // 打字机速度配置
 const TYPE_SPEED_MS = 30;
@@ -13,12 +14,13 @@ export default function ChatPage() {
     const bottomRef = useRef(null);
     const [input, setInput] = useState('');
     const [isSending, setIsSending] = useState(false);
+    const [modalImage, setModalImage] = useState(null);
 
     // 1. 获取全局配置
     const { bgConfig } = useSettings();
 
     // ID 管理
-    const userId = "admin";
+    const { userId, token } = useAuth();
     const [chatId] = useState(generateUUID());
 
     const [messages, setMessages] = useState([
@@ -42,16 +44,10 @@ export default function ChatPage() {
     const [bgUrl, setBgUrl] = useState(null);
 
     // 3. 异步获取背景图 URL
+// 3. 异步获取背景图 URL
     useEffect(() => {
         const fetchBackgroundUrl = async () => {
             try {
-                // 你的后端接口地址
-                const baseUrl = "http://localhost:8123/api/crossrow/image/background";
-                const params = new URLSearchParams();
-
-                params.append("userId", userId);
-
-                // --- 修改点：不再过滤非USER模式，直接取 bgConfig.mode ---
                 let mode = bgConfig?.mode || 'RANDOM';
 
                 // 唯一需要干预的情况：选了 USER 但没拿坐标，强制降级防报错
@@ -60,26 +56,60 @@ export default function ChatPage() {
                     mode = 'RANDOM';
                 }
 
+                console.log(`[FrontEnd] Fetching background... Mode: ${mode}, User: ${userId}`);
+
+                // ==========================================
+                // 分支 1：如果是 CUSTOM 模式，调用你的新接口
+                // ==========================================
+                if (mode === 'CUSTOM') {
+                    const response = await fetch("http://localhost:8123/api/user/background", {
+                        method: "GET",
+                        headers: {
+                            'Authorization': `Bearer ${token}` // 获取用户的自定义背景需要鉴权
+                        }
+                    });
+
+                    if (response.ok) {
+                        const customUrl = await response.text();
+                        console.log("[FrontEnd] Got Custom background URL:", customUrl);
+                        setBgUrl(customUrl);
+                    } else {
+                        console.error("[FrontEnd] Failed to fetch custom background. Status:", response.status);
+                    }
+                    return; // CUSTOM 模式处理完毕，直接返回
+                }
+
+                // ==========================================
+                // 分支 2：如果是其他模式，调用原有的地图/街景接口
+                // ==========================================
+                const baseUrl = "http://localhost:8123/api/crossrow/image/background";
+                const params = new URLSearchParams();
+
+                params.append("userId", userId);
                 params.append("mode", mode);
 
-                // 如果是 USER 模式且有坐标，传给后端
                 if (mode === 'USER' && bgConfig?.coords) {
                     params.append("lat", bgConfig.coords.lat);
                     params.append("lng", bgConfig.coords.lng);
                 }
 
-                console.log(`[FrontEnd] Fetching background... Mode: ${mode}, User: ${userId}`);
-
-                const response = await fetch(`${baseUrl}?${params.toString()}`);
+                const response = await fetch(`${baseUrl}?${params.toString()}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
 
                 if (response.ok) {
                     const urlString = await response.text();
-                    console.log("[FrontEnd] Got background URL:", urlString);
+                    console.log("[FrontEnd] Got generated background URL:", urlString);
                     if (urlString && urlString.startsWith('http')) {
                         setBgUrl(urlString);
+                    } else if (urlString && urlString.startsWith('/api')) {
+                        // 兼容一下如果后端返回的是本地相对路径（比如默认图片）
+                        setBgUrl(`http://localhost:8123${urlString}`);
                     }
                 } else {
-                    console.error("[FrontEnd] Failed to fetch background URL. Status:", response.status);
+                    console.error("[FrontEnd] Failed to fetch generated background. Status:", response.status);
                 }
             } catch (error) {
                 console.error("[FrontEnd] Error fetching background:", error);
@@ -139,7 +169,8 @@ export default function ChatPage() {
             .sort((a, b) => a[0] - b[0]);
 
         targetTextRef.current = sortedSteps
-            .map(([_, content]) => content)
+            //.map(([_, content]) => content)
+            .map(([_, content]) => content.replace(/\\n/g, '\n'))
             .join("\n\n");
     };
 
@@ -169,30 +200,52 @@ export default function ChatPage() {
                 { id: aiMsgId, text: "", sender: "ai" }
             ]);
 
-            const url = `http://localhost:8123/api/crossrow/agent/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}`;
+
+            //const url = `http://localhost:8123/api/crossrow/agent/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}`;
+            const url = `http://localhost:8123/api/crossrow/agent/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&token=${token}`;
             const eventSource = new EventSource(url);
 
             eventSourceRef.current = eventSource;
 
-            eventSource.addEventListener("step", (event) => {
-                const stepId = event.lastEventId ? parseInt(event.lastEventId, 10) : Date.now();
-                let rawData = event.data;
+            const processDataWithHiddenActions = (rawData) => {
+                let cleanedData = rawData;
 
-                if (rawData.startsWith('"') && rawData.endsWith('"')) {
-                    try { rawData = JSON.parse(rawData); } catch(e) {}
+                if (cleanedData.startsWith('"') && cleanedData.endsWith('"')) {
+                    try { cleanedData = JSON.parse(cleanedData); } catch(e) {}
                 }
 
+                // 正则匹配提取 <hidden_action>
+                const actionRegex = /<hidden_action\s+type=['"]show_image['"]\s+url=['"](.*?)['"]\s*\/>/gi;
+                let match;
+
+                while ((match = actionRegex.exec(cleanedData)) !== null) {
+                    // match[1] 现在直接就是 GCS 的公网 https 链接！
+                    const gcsUrl = match[1];
+
+                    // 延迟弹窗，配合打字机
+                    setTimeout(() => {
+                        setModalImage(gcsUrl); // 直接塞入链接，搞定！
+                    }, 800);
+                }
+
+                // 从显示的文本中抹除这个标签
+                cleanedData = cleanedData.replace(actionRegex, '').trim();
+                return cleanedData;
+            };
+
+            // 应用到 step 事件
+            eventSource.addEventListener("step", (event) => {
+                const stepId = event.lastEventId ? parseInt(event.lastEventId, 10) : Date.now();
+                const cleanedData = processDataWithHiddenActions(event.data);
+
                 if (!isNaN(stepId)) {
-                    stepContentsRef.current.set(stepId, rawData);
+                    stepContentsRef.current.set(stepId, cleanedData);
                     rebuildTargetText();
                 }
             });
 
             eventSource.addEventListener("complete", (event) => {
-                let rawData = event.data;
-                if (rawData.startsWith('"') && rawData.endsWith('"')) {
-                    try { rawData = JSON.parse(rawData); } catch(e) {}
-                }
+                const cleanedData = processDataWithHiddenActions(event.data);
 
                 const completeId = 999999;
                 if (!stepContentsRef.current.has(completeId)) {
@@ -240,9 +293,9 @@ export default function ChatPage() {
             </button>
 
             <div className="relative z-10 flex flex-col w-full max-w-5xl mx-auto h-screen px-8 md:px-16 py-12">
-                <div className="flex-1 overflow-y-auto no-scrollbar pb-8">
+                <div className="flex-1 overflow-y-auto custom-scrollbar pb-8 pr-2">
                     <div className="flex flex-col space-y-6">
-                        {messages.map((msg) => (
+                    {messages.map((msg) => (
                             <div key={msg.id} className="animate-fade-in w-full text-left">
                                 <p className={`text-lg md:text-xl leading-snug tracking-tight vn-text-shadow break-words whitespace-pre-wrap ${
                                     msg.sender === 'user' ? 'text-cyan-200' : 'text-white'
@@ -274,6 +327,27 @@ export default function ChatPage() {
                     </div>
                 </div>
             </div>
+            {modalImage && (
+                <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/85 backdrop-blur-sm animate-fade-in">
+                    {/* 关闭按钮 (右上角 叉号) */}
+                    <button
+                        onClick={() => setModalImage(null)}
+                        className="absolute top-6 right-8 text-white/50 hover:text-white text-4xl font-sans transition-colors cursor-pointer"
+                        title="Close"
+                    >
+                        &times;
+                    </button>
+
+                    {/* 图片展示容器 */}
+                    <div className="relative max-w-5xl max-h-[85vh] p-4 bg-white/5 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-white/10">
+                        <img
+                            src={modalImage}
+                            alt="Generated Output"
+                            className="max-w-full max-h-full object-contain rounded-lg"
+                        />
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

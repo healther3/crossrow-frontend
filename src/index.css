@@ -85,3 +85,41 @@ body {
     color: #fff;
     text-shadow: 1px 1px 0 #000;
 }
+
+.custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+    transition: scrollbar-color 0.3s ease;
+}
+/* 针对火狐浏览器 (Firefox) 的基础支持 */
+.custom-scrollbar {
+    /* 火狐原生不支持精细的 hover 呼出，为了极致的沉浸感，直接隐藏，但不影响滚轮滑动 */
+    scrollbar-width: none;
+}
+
+/* 针对 Chrome / Safari / Edge 的高级自定义 */
+.custom-scrollbar::-webkit-scrollbar {
+    width: 6px; /* 极细的触发判定区 */
+    background-color: transparent; /* 轨道完全透明 */
+}
+
+/* 轨道背景 (Track) */
+.custom-scrollbar::-webkit-scrollbar-track {
+    background-color: transparent;
+}
+
+/* 滚动滑块 (Thumb) 默认完全透明 */
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    border-radius: 10px;
+}
+
+/* 【关键修改】：删除了容器 hover，只有鼠标精准悬停在滚动条本身时才显示半透明 */
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.3);
+}
+
+/* 正在按住拖拽滑块时，变得更亮一点，提供操作反馈 */
+.custom-scrollbar::-webkit-scrollbar-thumb:active {
+    background-color: rgba(255, 255, 255, 0.6);
+}

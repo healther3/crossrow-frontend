@@ -5,8 +5,13 @@ import Background from './components/Background';
 import InteractiveCanvas from './components/InteractiveCanvas';
 import ChatPage from './pages/ChatPage';
 import OptionsPage from './pages/OptionPage'; // 1. 引用名保持 OptionsPage
+import LoginPage from './pages/LoginPage';
+import RegisterPage from './pages/RegisterPage';
+
 import { SettingsProvider } from './context/SettingsContext';
 import { TransitionProvider, useTransition } from './context/TransitionContext';
+import { AuthProvider } from './context/AuthContext';
+import PrivateRoute from './components/PrivateRoute';
 
 function Home() {
     const { navigateWithTransition } = useTransition();
@@ -77,14 +82,25 @@ function AppRoutes() {
     return (
         <div className="relative min-h-screen text-gray-800 font-sans selection:bg-blue-200 selection:text-blue-900 overflow-hidden">
             <Background/>
-            {/* 建议：将流体光标放在这里，作为全局特效 */}
             <InteractiveCanvas />
 
             <Routes>
+                {/* 公开路由 */}
                 <Route path="/" element={<Home />} />
-                <Route path="/chat" element={<ChatPage />} />
-                {/* 修正：这里使用 import 进来的 OptionsPage */}
-                <Route path="/options" element={<OptionsPage />} />
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/register" element={<RegisterPage />} />
+
+                {/* --- 受保护路由 --- */}
+                <Route path="/chat" element={
+                    <PrivateRoute>
+                        <ChatPage />
+                    </PrivateRoute>
+                } />
+                <Route path="/options" element={
+                    <PrivateRoute>
+                        <OptionsPage />
+                    </PrivateRoute>
+                } />
             </Routes>
         </div>
     );
@@ -92,13 +108,15 @@ function AppRoutes() {
 
 function App() {
     return (
-        <SettingsProvider>
-            <BrowserRouter>
-                <TransitionProvider>
-                    <AppRoutes/>
-                </TransitionProvider>
-            </BrowserRouter>
-        </SettingsProvider>
+        <AuthProvider>
+            <SettingsProvider>
+                <BrowserRouter>
+                    <TransitionProvider>
+                        <AppRoutes/>
+                    </TransitionProvider>
+                </BrowserRouter>
+            </SettingsProvider>
+        </AuthProvider>
     );
 }
 
