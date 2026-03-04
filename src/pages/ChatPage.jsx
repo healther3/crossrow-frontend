@@ -15,6 +15,7 @@ export default function ChatPage() {
     const [input, setInput] = useState('');
     const [isSending, setIsSending] = useState(false);
     const [modalImage, setModalImage] = useState(null);
+    const [agentQuestion, setAgentQuestion] = useState(null);
 
     // 1. 获取全局配置
     const { bgConfig } = useSettings();
@@ -177,6 +178,7 @@ export default function ChatPage() {
     const handleSend = (e) => {
         if (e.key === 'Enter' && input.trim() && !isSending && !e.nativeEvent.isComposing) {
             setIsSending(true);
+            setAgentQuestion(null);
             const userText = input.trim();
             setInput('');
 
@@ -230,7 +232,26 @@ export default function ChatPage() {
 
                 // 从显示的文本中抹除这个标签
                 cleanedData = cleanedData.replace(actionRegex, '').trim();
-                return cleanedData;
+
+                // 2. --- 新增：解析 Ask Human ---
+                // 匹配: <hidden_action type='ask_human' question='...' />
+                const askRegex = /<hidden_action\s+type=['"]ask_human['"]\s+question=['"](.*?)['"]\s*\/>/gi;
+                let askMatch;
+                while ((askMatch = askRegex.exec(cleanedData)) !== null) {
+                    const questionText = askMatch[1];
+                    // 只有当问题变了才更新状态，防止重复渲染
+                    // 稍微延迟一点，等字打完再高亮输入框
+                    setTimeout(() => {
+                        setAgentQuestion(questionText);
+                        // 也可以在这里强制 focus 输入框 (如果需要)
+                    }, 500);
+                }
+                // 移除标签，保持界面干净
+                cleanedData = cleanedData.replace(askRegex, '');
+
+                cleanedData = cleanedData.replace('(Waiting for user input...)', '');
+
+                return cleanedData.trim();
             };
 
             // 应用到 step 事件
@@ -295,7 +316,7 @@ export default function ChatPage() {
             <div className="relative z-10 flex flex-col w-full max-w-5xl mx-auto h-screen px-8 md:px-16 py-12">
                 <div className="flex-1 overflow-y-auto custom-scrollbar pb-8 pr-2">
                     <div className="flex flex-col space-y-6">
-                    {messages.map((msg) => (
+                        {messages.map((msg) => (
                             <div key={msg.id} className="animate-fade-in w-full text-left">
                                 <p className={`text-lg md:text-xl leading-snug tracking-tight vn-text-shadow break-words whitespace-pre-wrap ${
                                     msg.sender === 'user' ? 'text-cyan-200' : 'text-white'
@@ -304,15 +325,30 @@ export default function ChatPage() {
                                 </p>
                             </div>
                         ))}
-                        <div ref={bottomRef} />
+                        <div ref={bottomRef}/>
                     </div>
                 </div>
 
-                <div className="mt-4 pt-4 border-t border-white/10 w-full">
+                <div className={`mt-4 pt-4 border-t transition-colors duration-500 w-full ${
+                    // 1. 动态边框颜色：如果有问题，变黄；否则保持原来的白色半透明
+                    agentQuestion ? 'border-yellow-400/50' : 'border-white/10'
+                }`}>
+
+                    {/* 2. 新增：提示文字区域 */}
+                    {agentQuestion && (
+                        <div className="mb-2 text-sm text-yellow-300 font-serif tracking-wide animate-pulse">
+                            [System]: Waiting for confirmation: "{agentQuestion}"
+                        </div>
+                    )}
+
                     <div className="flex items-center w-full">
-                        <span className="text-lg md:text-xl text-white/50 vn-text-shadow mr-2 font-bold">
+                        {/* 3. 修改：箭头颜色动态变化 */}
+                        <span className={`text-lg md:text-xl vn-text-shadow mr-2 font-bold transition-colors ${
+                            agentQuestion ? 'text-yellow-400' : 'text-white/50'
+                        }`}>
                             &gt;
                         </span>
+
                         <input
                             type="text"
                             value={input}
@@ -320,15 +356,17 @@ export default function ChatPage() {
                             onKeyDown={handleSend}
                             autoFocus
                             disabled={isSending}
+                            // 4. 修改：placeholder 动态变化，提示用户在这里输入答案
+                            placeholder={isSending ? "Processing..." : (agentQuestion ? "Type your answer here..." : "")}
                             className={`flex-1 w-full bg-transparent border-none outline-none text-lg md:text-xl text-white vn-text-shadow placeholder-white/20 font-vn leading-snug tracking-tight caret-transparent cursor-blink ${isSending ? 'opacity-50' : ''}`}
-                            placeholder={isSending ? "Processing..." : ""}
                             autoComplete="off"
                         />
                     </div>
                 </div>
             </div>
             {modalImage && (
-                <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/85 backdrop-blur-sm animate-fade-in">
+                <div
+                    className="fixed inset-0 z-[999] flex items-center justify-center bg-black/85 backdrop-blur-sm animate-fade-in">
                     {/* 关闭按钮 (右上角 叉号) */}
                     <button
                         onClick={() => setModalImage(null)}
@@ -339,7 +377,8 @@ export default function ChatPage() {
                     </button>
 
                     {/* 图片展示容器 */}
-                    <div className="relative max-w-5xl max-h-[85vh] p-4 bg-white/5 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-white/10">
+                    <div
+                        className="relative max-w-5xl max-h-[85vh] p-4 bg-white/5 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-white/10">
                         <img
                             src={modalImage}
                             alt="Generated Output"
