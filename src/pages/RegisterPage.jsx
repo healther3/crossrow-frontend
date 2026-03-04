@@ -51,14 +51,19 @@ export default function RegisterPage() {
             <div className="absolute inset-0 bg-white/20 backdrop-blur-sm z-0" />
             <Navbar />
 
-            <div className="relative z-10 w-full max-w-xl px-6">
-                <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl p-10 md:p-14 text-center transform transition-all duration-500">
+            {/* 修改点1：宽度 max-w-4xl */}
+            <div className="relative z-10 w-full max-w-4xl px-6">
 
-                    <h2 className="text-4xl md:text-5xl font-bold text-slate-700 mb-8 tracking-wider vn-title-container">
-                        Initialize
+                {/* 修改点2：Padding p-12 md:p-16 */}
+                <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl p-12 md:p-16 text-center transform transition-all duration-500">
+
+                    {/* 修改点3：mb-12 */}
+                    <h2 className="text-4xl md:text-5xl font-bold text-slate-700 mb-12 tracking-wider vn-title-container">
+                        Register
                     </h2>
 
-                    <div className="space-y-6 mb-8">
+                    {/* 修改点4：约束输入框宽度 max-w-lg mx-auto */}
+                    <div className="space-y-6 mb-8 max-w-lg mx-auto">
                         <input
                             type="text"
                             placeholder="Choose a Username"

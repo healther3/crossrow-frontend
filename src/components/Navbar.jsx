@@ -21,7 +21,7 @@ export default function Navbar() {
 
     return (
         // 保持了你原有的全部 UI 样式
-        <nav className="fixed top-0 left-0 w-full z-50 border-b border-white/10 bg-slate-200/100 backdrop-blur-md shadow-lg transition-all duration-300">
+        <nav className="fixed top-0 left-0 w-full z-50 border-b border-white/10 bg-slate-200/100 backdrop-blur-md shadow-lg transition-all duration-300 pointer-events-auto">
             <div className="mx-auto w-full px-6 lg:px-12">
                 <div className="flex h-16 items-center justify-between">
 

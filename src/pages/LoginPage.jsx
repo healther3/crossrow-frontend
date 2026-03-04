@@ -58,15 +58,19 @@ export default function LoginPage() {
             <div className="absolute inset-0 bg-white/20 backdrop-blur-sm z-0" />
             <Navbar />
 
-            <div className="relative z-10 w-full max-w-xl px-6">
-                <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl p-10 md:p-14 text-center transform transition-all duration-500">
+            {/* 修改点1：宽度从 max-w-xl 改为 max-w-4xl，向 OptionPage 看齐 */}
+            <div className="relative z-10 w-full max-w-4xl px-6">
 
-                    <h2 className="text-4xl md:text-5xl font-bold text-slate-700 mb-8 tracking-wider vn-title-container">
+                {/* 修改点2：Padding 增加到 p-12 md:p-16，与 OptionPage 一致 */}
+                <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl p-12 md:p-16 text-center transform transition-all duration-500">
+
+                    {/* 修改点3：Margin bottom 增加到 mb-12 */}
+                    <h2 className="text-4xl md:text-5xl font-bold text-slate-700 mb-12 tracking-wider vn-title-container">
                         System Login
                     </h2>
 
-                    <div className="space-y-6 mb-8">
-                        {/* 简约风格输入框 */}
+                    {/* 修改点4：增加 max-w-lg mx-auto，防止输入框在宽卡片中拉得太长 */}
+                    <div className="space-y-6 mb-8 max-w-lg mx-auto">
                         <input
                             type="text"
                             placeholder="Username"
