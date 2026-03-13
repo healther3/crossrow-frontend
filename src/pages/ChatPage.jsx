@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-// 1. 之前遗留的未使用引用已清理
-import { generateUUID, getUserId } from '../utils/uuid';
+import { generateUUID } from '../utils/uuid';
 import { useSettings } from '../context/SettingsContext';
 import { useTransition } from '../context/TransitionContext';
 import { useAuth } from '../context/AuthContext';
@@ -16,6 +15,7 @@ export default function ChatPage() {
     const [isSending, setIsSending] = useState(false);
     const [modalImage, setModalImage] = useState(null);
     const [agentQuestion, setAgentQuestion] = useState(null);
+    const [isExpertMode, setIsExpertMode] = useState(false);
 
     // 1. 获取全局配置
     const { bgConfig } = useSettings();
@@ -45,7 +45,6 @@ export default function ChatPage() {
     const [bgUrl, setBgUrl] = useState(null);
 
     // 3. 异步获取背景图 URL
-// 3. 异步获取背景图 URL
     useEffect(() => {
         const fetchBackgroundUrl = async () => {
             try {
@@ -59,14 +58,17 @@ export default function ChatPage() {
 
                 console.log(`[FrontEnd] Fetching background... Mode: ${mode}, User: ${userId}`);
 
+                // 读取环境变量或使用默认值 (解决硬编码问题)
+                const baseUrlAPI = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8123';
+
                 // ==========================================
                 // 分支 1：如果是 CUSTOM 模式，调用你的新接口
                 // ==========================================
                 if (mode === 'CUSTOM') {
-                    const response = await fetch("http://localhost:8123/api/user/background", {
+                    const response = await fetch(`${baseUrlAPI}/api/user/background`, {
                         method: "GET",
                         headers: {
-                            'Authorization': `Bearer ${token}` // 获取用户的自定义背景需要鉴权
+                            'Authorization': `Bearer ${token}`
                         }
                     });
 
@@ -77,13 +79,13 @@ export default function ChatPage() {
                     } else {
                         console.error("[FrontEnd] Failed to fetch custom background. Status:", response.status);
                     }
-                    return; // CUSTOM 模式处理完毕，直接返回
+                    return;
                 }
 
                 // ==========================================
                 // 分支 2：如果是其他模式，调用原有的地图/街景接口
                 // ==========================================
-                const baseUrl = "http://localhost:8123/api/crossrow/image/background";
+                const baseUrl = `${baseUrlAPI}/api/crossrow/image/background`;
                 const params = new URLSearchParams();
 
                 params.append("userId", userId);
@@ -106,8 +108,7 @@ export default function ChatPage() {
                     if (urlString && urlString.startsWith('http')) {
                         setBgUrl(urlString);
                     } else if (urlString && urlString.startsWith('/api')) {
-                        // 兼容一下如果后端返回的是本地相对路径（比如默认图片）
-                        setBgUrl(`http://localhost:8123${urlString}`);
+                        setBgUrl(`${baseUrlAPI}${urlString}`);
                     }
                 } else {
                     console.error("[FrontEnd] Failed to fetch generated background. Status:", response.status);
@@ -118,7 +119,7 @@ export default function ChatPage() {
         };
 
         fetchBackgroundUrl();
-    }, [bgConfig]);
+    }, [bgConfig, userId, token]); // 依赖项加上 userId 和 token 更严谨
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -170,7 +171,6 @@ export default function ChatPage() {
             .sort((a, b) => a[0] - b[0]);
 
         targetTextRef.current = sortedSteps
-            //.map(([_, content]) => content)
             .map(([_, content]) => content.replace(/\\n/g, '\n'))
             .join("\n\n");
     };
@@ -185,13 +185,11 @@ export default function ChatPage() {
             const userMsgId = Date.now();
             const aiMsgId = userMsgId + 1;
 
-            // 重置状态
             currentMsgIdRef.current = aiMsgId;
             targetTextRef.current = "";
             displayedIndexRef.current = 0;
             stepContentsRef.current.clear();
 
-            // 发送前先关闭可能存在的旧连接
             if (eventSourceRef.current) {
                 eventSourceRef.current.close();
             }
@@ -202,11 +200,12 @@ export default function ChatPage() {
                 { id: aiMsgId, text: "", sender: "ai" }
             ]);
 
+            // --- 修复：动态判断路由，并拼接 baseUrl ---
+            const endpoint = isExpertMode ? 'expert/chat' : 'agent/chat';
+            const baseUrlAPI = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8123';
+            const url = `${baseUrlAPI}/api/crossrow/${endpoint}?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&token=${token}`;
 
-            //const url = `http://localhost:8123/api/crossrow/agent/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}`;
-            const url = `http://localhost:8123/api/crossrow/agent/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&token=${token}`;
             const eventSource = new EventSource(url);
-
             eventSourceRef.current = eventSource;
 
             const processDataWithHiddenActions = (rawData) => {
@@ -216,45 +215,34 @@ export default function ChatPage() {
                     try { cleanedData = JSON.parse(cleanedData); } catch(e) {}
                 }
 
-                // 正则匹配提取 <hidden_action>
+                // 1. 解析显示图片标签
                 const actionRegex = /<hidden_action\s+type=['"]show_image['"]\s+url=['"](.*?)['"]\s*\/>/gi;
                 let match;
-
                 while ((match = actionRegex.exec(cleanedData)) !== null) {
-                    // match[1] 现在直接就是 GCS 的公网 https 链接！
                     const gcsUrl = match[1];
-
-                    // 延迟弹窗，配合打字机
                     setTimeout(() => {
-                        setModalImage(gcsUrl); // 直接塞入链接，搞定！
+                        setModalImage(gcsUrl);
                     }, 800);
                 }
-
-                // 从显示的文本中抹除这个标签
                 cleanedData = cleanedData.replace(actionRegex, '').trim();
 
-                // 2. --- 新增：解析 Ask Human ---
-                // 匹配: <hidden_action type='ask_human' question='...' />
+                // 2. 解析 Ask Human 标签
                 const askRegex = /<hidden_action\s+type=['"]ask_human['"]\s+question=['"](.*?)['"]\s*\/>/gi;
                 let askMatch;
                 while ((askMatch = askRegex.exec(cleanedData)) !== null) {
                     const questionText = askMatch[1];
-                    // 只有当问题变了才更新状态，防止重复渲染
-                    // 稍微延迟一点，等字打完再高亮输入框
                     setTimeout(() => {
                         setAgentQuestion(questionText);
-                        // 也可以在这里强制 focus 输入框 (如果需要)
                     }, 500);
                 }
-                // 移除标签，保持界面干净
                 cleanedData = cleanedData.replace(askRegex, '');
 
+                // 去除可能从后端传来的提示文本
                 cleanedData = cleanedData.replace('(Waiting for user input...)', '');
 
                 return cleanedData.trim();
             };
 
-            // 应用到 step 事件
             eventSource.addEventListener("step", (event) => {
                 const stepId = event.lastEventId ? parseInt(event.lastEventId, 10) : Date.now();
                 const cleanedData = processDataWithHiddenActions(event.data);
@@ -270,7 +258,8 @@ export default function ChatPage() {
 
                 const completeId = 999999;
                 if (!stepContentsRef.current.has(completeId)) {
-                    stepContentsRef.current.set(completeId, rawData);
+                    // --- 修复：存入 cleanedData，而不是报错的 rawData ---
+                    stepContentsRef.current.set(completeId, cleanedData);
                     rebuildTargetText();
                 }
             });
@@ -287,22 +276,18 @@ export default function ChatPage() {
     return (
         <div className="relative min-h-screen font-vn overflow-hidden flex flex-col">
 
-            {/* --- 背景图渲染层 --- */}
             <div className="absolute inset-0 z-0 bg-slate-900">
-                {/* 1. 图片层：使用 object-cover 铺满 */}
                 {bgUrl && (
                     <img
                         src={bgUrl}
                         alt="Background"
                         className="w-full h-full object-cover opacity-60 filter brightness-75 contrast-125 transition-opacity duration-1000 animate-fade-in"
                         onError={(e) => {
-                            e.target.style.display = 'none'; // 加载失败时隐藏
+                            e.target.style.display = 'none';
                             console.warn("Background image failed to load");
                         }}
                     />
                 )}
-
-                {/* 2. 蒙版层：保留之前的 backdrop-blur，但叠加在图片上 */}
                 <div className="absolute inset-0 bg-gradient-to-b from-slate-900/60 via-slate-900/40 to-slate-900/90 backdrop-blur-[1px]" />
             </div>
 
@@ -330,21 +315,35 @@ export default function ChatPage() {
                 </div>
 
                 <div className={`mt-4 pt-4 border-t transition-colors duration-500 w-full ${
-                    // 1. 动态边框颜色：如果有问题，变黄；否则保持原来的白色半透明
-                    agentQuestion ? 'border-yellow-400/50' : 'border-white/10'
+                    agentQuestion ? 'border-yellow-400/50' : (isExpertMode ? 'border-blue-500/50' : 'border-white/10')
                 }`}>
 
-                    {/* 2. 新增：提示文字区域 */}
-                    {agentQuestion && (
-                        <div className="mb-2 text-sm text-yellow-300 font-serif tracking-wide animate-pulse">
-                            [System]: Waiting for confirmation: "{agentQuestion}"
+                    <div className="flex justify-between items-end mb-2 min-h-[24px]">
+                        <div>
+                            {agentQuestion && (
+                                <div className="text-sm text-yellow-300 font-serif tracking-wide animate-pulse">
+                                    [System]: Waiting for confirmation: "{agentQuestion}"
+                                </div>
+                            )}
                         </div>
-                    )}
+
+                        <button
+                            onClick={() => setIsExpertMode(!isExpertMode)}
+                            disabled={isSending || agentQuestion}
+                            className={`text-xs font-sans tracking-widest px-3 py-1 rounded transition-all duration-300 border ${
+                                isExpertMode
+                                    ? 'border-blue-500 text-blue-300 bg-blue-500/20 shadow-[0_0_10px_rgba(168,85,247,0.4)]'
+                                    : 'border-slate-500/50 text-slate-400 hover:text-slate-200 hover:border-slate-400'
+                            } ${isSending || agentQuestion ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                            title="Toggle Multi-Agent Expert Routing"
+                        >
+                            {isExpertMode ? '✦ EXPERT' : '✧ STANDARD'}
+                        </button>
+                    </div>
 
                     <div className="flex items-center w-full">
-                        {/* 3. 修改：箭头颜色动态变化 */}
                         <span className={`text-lg md:text-xl vn-text-shadow mr-2 font-bold transition-colors ${
-                            agentQuestion ? 'text-yellow-400' : 'text-white/50'
+                            agentQuestion ? 'text-purple-400' : (isExpertMode ? 'text-white-400' : 'text-white/50')
                         }`}>
                             &gt;
                         </span>
@@ -356,18 +355,16 @@ export default function ChatPage() {
                             onKeyDown={handleSend}
                             autoFocus
                             disabled={isSending}
-                            // 4. 修改：placeholder 动态变化，提示用户在这里输入答案
-                            placeholder={isSending ? "Processing..." : (agentQuestion ? "Type your answer here..." : "")}
+                            placeholder={isSending ? "Processing..." : (agentQuestion ? "Type your answer here..." : "Message...")}
                             className={`flex-1 w-full bg-transparent border-none outline-none text-lg md:text-xl text-white vn-text-shadow placeholder-white/20 font-vn leading-snug tracking-tight caret-transparent cursor-blink ${isSending ? 'opacity-50' : ''}`}
                             autoComplete="off"
                         />
                     </div>
                 </div>
             </div>
+
             {modalImage && (
-                <div
-                    className="fixed inset-0 z-[999] flex items-center justify-center bg-black/85 backdrop-blur-sm animate-fade-in">
-                    {/* 关闭按钮 (右上角 叉号) */}
+                <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/85 backdrop-blur-sm animate-fade-in">
                     <button
                         onClick={() => setModalImage(null)}
                         className="absolute top-6 right-8 text-white/50 hover:text-white text-4xl font-sans transition-colors cursor-pointer"
@@ -376,9 +373,7 @@ export default function ChatPage() {
                         &times;
                     </button>
 
-                    {/* 图片展示容器 */}
-                    <div
-                        className="relative max-w-5xl max-h-[85vh] p-4 bg-white/5 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-white/10">
+                    <div className="relative max-w-5xl max-h-[85vh] p-4 bg-white/5 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-white/10">
                         <img
                             src={modalImage}
                             alt="Generated Output"

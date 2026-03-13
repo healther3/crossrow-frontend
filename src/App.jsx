@@ -23,12 +23,12 @@ function Home() {
 
             {/* Title */}
             <div className="vn-title-container text-6xl md:text-8xl mb-16 tracking-wide -mt-20 transition-all duration-700 ease-in-out">
-                <span className="vn-title-stroke" aria-hidden="true">Choose Life?</span>
-                <span className="vn-title-fill">Choose Life?</span>
+                <span className="vn-title-stroke" aria-hidden="true">CrossRow</span>
+                <span className="vn-title-fill">CrossRow</span>
             </div>
 
             <p className="mt-2 text-xl font-medium text-slate-500 tracking-wide drop-shadow-sm mb-16">
-                - choose life? -
+                - let's chat together -
             </p>
 
             {/* Menu Buttons Area */}
