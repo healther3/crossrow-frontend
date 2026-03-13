@@ -2,9 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSettings } from '../context/SettingsContext';
 import { useTransition } from '../context/TransitionContext';
 import { useAuth } from '../context/AuthContext';
-import { Menu, Plus, MessageSquare } from 'lucide-react';
+import { Menu } from 'lucide-react';
 
-// 打字机速度配置
+// 引入刚剥离出去的侧边栏组件
+import SessionSidebar from '../components/SessionSidebar';
+
 const TYPE_SPEED_MS = 30;
 const CHARS_PER_TICK = 3;
 
@@ -17,110 +19,58 @@ export default function ChatPage() {
     const [agentQuestion, setAgentQuestion] = useState(null);
     const [isExpertMode, setIsExpertMode] = useState(false);
 
-    // --- 会话管理相关状态 ---
-    const [isSidebarOpen, setIsSidebarOpen] = useState(true); // 侧边栏开关
-    const [sessions, setSessions] = useState([]); // 会话列表
-    const [chatId, setChatId] = useState(null); // 当前会话ID (由后端生成)
+    // --- 极简的会话状态 ---
+    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    const [chatId, setChatId] = useState(null);
 
-    // 1. 获取全局配置
     const { bgConfig } = useSettings();
-
-    // ID 管理
     const { userId, token } = useAuth();
+
     const [messages, setMessages] = useState([
         { id: 1, text: "Wait... where am I?", sender: "user" },
         { id: 2, text: "You have arrived. This is the boundary of consciousness.", sender: "ai" },
         { id: 3, text: "The noise of the world fades away here.", sender: "ai" },
     ]);
 
-    // --- 打字机核心状态 ---
     const targetTextRef = useRef("");
     const displayedIndexRef = useRef(0);
     const currentMsgIdRef = useRef(null);
     const stepContentsRef = useRef(new Map());
     const eventSourceRef = useRef(null);
 
-    // --- 背景图状态 ---
     const [bgUrl, setBgUrl] = useState(null);
-
-    // 自动获取基础 URL
     const baseUrlAPI = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8123';
-    // 注意：这里请与你后端 Controller 的 @RequestMapping 保持一致，一般为 /api/session
-    const sessionApiUrl = `${baseUrlAPI}/api/sessions`;
 
-    // 1. 获取用户的会话列表
-    const fetchSessions = async () => {
-        try {
-            const response = await fetch(sessionApiUrl, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (response.ok) {
-                const data = await response.json();
-                setSessions(data);
-
-                // 如果当前没有 chatId，且后端有数据，默认选中第一个
-                if (!chatId && data.length > 0) {
-                    setChatId(data[0].id);
-                } else if (!chatId && data.length === 0) {
-                    // 如果连历史记录都没有，自动创建一个新的
-                    createNewSession();
-                }
-            }
-        } catch (error) {
-            console.error("Failed to fetch sessions:", error);
-        }
-    };
-
-    // 2. 创建新会话
-    const createNewSession = async () => {
-        try {
-            const response = await fetch(sessionApiUrl, {
-                method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            if (response.ok) {
-                const newSession = await response.json();
-                setSessions(prev => [newSession, ...prev]);
-                setChatId(newSession.id);
-                setMessages([
-                    { id: 1, text: "Wait... where am I?", sender: "user" },
-                    { id: 2, text: "You have arrived. This is the boundary of consciousness.", sender: "ai" },
-                    { id: 3, text: "The noise of the world fades away here.", sender: "ai" },
-                ]);
-                stepContentsRef.current.clear();
-            }
-        } catch (error) {
-            console.error("Failed to create session:", error);
-        }
-    };
-
-    // 3. 切换会话
-    const switchSession = (targetChatId) => {
-        if (chatId === targetChatId) return;
-        setChatId(targetChatId);
-
-        // ⚠️ 未来调用 GET /messages/{targetChatId} 加载历史记录，目前仅做清屏
+    // ==========================================
+    // 侧边栏回调逻辑 (只负责清屏，不处理数据请求)
+    // ==========================================
+    const handleSessionSelect = (selectedId) => {
+        if (chatId === selectedId) return;
+        setChatId(selectedId);
+        // ⚠️ 未来调用 GET /messages/{selectedId} 加载历史记录，目前仅做清屏
         setMessages([
             { id: 1, text: "[System]: Loading historical records...", sender: "ai" }
         ]);
         stepContentsRef.current.clear();
     };
 
-    // 页面加载时获取会话列表
-    useEffect(() => {
-        if (token) {
-            fetchSessions();
-        }
-    }, [token]);
+    const handleNewSession = (newId) => {
+        setChatId(newId);
+        setMessages([
+            { id: 1, text: "Wait... where am I?", sender: "user" },
+            { id: 2, text: "You have arrived. This is the boundary of consciousness.", sender: "ai" },
+            { id: 3, text: "The noise of the world fades away here.", sender: "ai" },
+        ]);
+        stepContentsRef.current.clear();
+    };
 
-    // 异步获取背景图 URL
+    // 背景图获取逻辑
     useEffect(() => {
         const fetchBackgroundUrl = async () => {
             try {
                 let mode = bgConfig?.mode || 'RANDOM';
 
                 if (mode === 'USER' && (!bgConfig?.coords || !bgConfig.coords.lat)) {
-                    console.warn("[FrontEnd] User mode selected but no coords found. Falling back to RANDOM.");
                     mode = 'RANDOM';
                 }
 
@@ -129,10 +79,8 @@ export default function ChatPage() {
                         method: "GET",
                         headers: { 'Authorization': `Bearer ${token}` }
                     });
-
                     if (response.ok) {
-                        const customUrl = await response.text();
-                        setBgUrl(customUrl);
+                        setBgUrl(await response.text());
                     }
                     return;
                 }
@@ -160,23 +108,17 @@ export default function ChatPage() {
                     }
                 }
             } catch (error) {
-                console.error("[FrontEnd] Error fetching background:", error);
+                console.error("Error fetching background:", error);
             }
         };
 
         fetchBackgroundUrl();
-    }, [bgConfig, userId, token]);
+    }, [bgConfig, userId, token, baseUrlAPI]);
 
+    // 自动滚动 & 清理 EventSource
+    useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
     useEffect(() => {
-        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [messages]);
-
-    useEffect(() => {
-        return () => {
-            if (eventSourceRef.current) {
-                eventSourceRef.current.close();
-            }
-        };
+        return () => { if (eventSourceRef.current) eventSourceRef.current.close(); };
     }, []);
 
     // --- 打字机引擎 ---
@@ -188,7 +130,6 @@ export default function ChatPage() {
                     targetTextRef.current.length
                 );
                 const displayText = targetTextRef.current.slice(0, nextIndex);
-
                 setMessages(prev => {
                     const newMessages = [...prev];
                     const targetIndex = newMessages.findIndex(m => m.id === currentMsgIdRef.current);
@@ -200,7 +141,6 @@ export default function ChatPage() {
                 displayedIndexRef.current = nextIndex;
             }
         }, TYPE_SPEED_MS);
-
         return () => clearInterval(timer);
     }, []);
 
@@ -212,13 +152,10 @@ export default function ChatPage() {
             .join("\n\n");
     };
 
+    // 核心发送逻辑
     const handleSend = (e) => {
         if (e.key === 'Enter' && input.trim() && !isSending && !e.nativeEvent.isComposing) {
-            // 安全校验：如果没有 chatId，不允许发送
-            if (!chatId) {
-                console.warn("No ChatSession ID found!");
-                return;
-            }
+            if (!chatId) return; // 没拿到会话ID不允许发送
 
             setIsSending(true);
             setAgentQuestion(null);
@@ -233,9 +170,7 @@ export default function ChatPage() {
             displayedIndexRef.current = 0;
             stepContentsRef.current.clear();
 
-            if (eventSourceRef.current) {
-                eventSourceRef.current.close();
-            }
+            if (eventSourceRef.current) eventSourceRef.current.close();
 
             setMessages(prev => [
                 ...prev,
@@ -244,7 +179,6 @@ export default function ChatPage() {
             ]);
 
             const endpoint = isExpertMode ? 'expert/chat' : 'agent/chat';
-            // 使用正确的 chatId
             const url = `${baseUrlAPI}/api/crossrow/${endpoint}?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&token=${token}`;
 
             const eventSource = new EventSource(url);
@@ -256,7 +190,6 @@ export default function ChatPage() {
                     try { cleanedData = JSON.parse(cleanedData); } catch(e) {}
                 }
 
-                // 1. 解析图片标签
                 const actionRegex = /<hidden_action\s+type=['"]show_image['"]\s+url=['"](.*?)['"]\s*\/>/gi;
                 let match;
                 while ((match = actionRegex.exec(cleanedData)) !== null) {
@@ -265,7 +198,6 @@ export default function ChatPage() {
                 }
                 cleanedData = cleanedData.replace(actionRegex, '').trim();
 
-                // 2. 解析提问标签
                 const askRegex = /<hidden_action\s+type=['"]ask_human['"]\s+question=['"](.*?)['"]\s*\/>/gi;
                 let askMatch;
                 while ((askMatch = askRegex.exec(cleanedData)) !== null) {
@@ -281,7 +213,6 @@ export default function ChatPage() {
             eventSource.addEventListener("step", (event) => {
                 const stepId = event.lastEventId ? parseInt(event.lastEventId, 10) : Date.now();
                 const cleanedData = processDataWithHiddenActions(event.data);
-
                 if (!isNaN(stepId)) {
                     stepContentsRef.current.set(stepId, cleanedData);
                     rebuildTargetText();
@@ -298,7 +229,6 @@ export default function ChatPage() {
             });
 
             eventSource.onerror = (err) => {
-                console.log("Stream ended");
                 eventSource.close();
                 setIsSending(false);
                 eventSourceRef.current = null;
@@ -316,54 +246,23 @@ export default function ChatPage() {
                         src={bgUrl}
                         alt="Background"
                         className="w-full h-full object-cover opacity-60 filter brightness-75 contrast-125 transition-opacity duration-1000 animate-fade-in"
-                        onError={(e) => {
-                            e.target.style.display = 'none';
-                            console.warn("Background image failed to load");
-                        }}
+                        onError={(e) => { e.target.style.display = 'none'; }}
                     />
                 )}
                 <div className="absolute inset-0 bg-gradient-to-b from-slate-900/60 via-slate-900/40 to-slate-900/90 backdrop-blur-[1px]" />
             </div>
 
-            {/* --- 左侧边栏 (Sidebar) --- */}
-            <div className={`relative z-40 flex-shrink-0 bg-slate-900/80 backdrop-blur-xl border-r border-white/10 transition-all duration-300 ease-in-out ${
-                isSidebarOpen ? 'w-64 translate-x-0' : 'w-0 -translate-x-full overflow-hidden'
-            }`}>
-                <div className="flex flex-col h-full p-4 w-64">
-                    {/* 新建对话按钮 */}
-                    <button
-                        onClick={createNewSession}
-                        className="flex items-center justify-center gap-2 w-full py-3 mb-6 border border-white/20 rounded-xl text-white/80 hover:text-white hover:bg-white/10 hover:border-white/40 transition-all duration-300 font-sans tracking-widest text-sm cursor-pointer shadow-lg"
-                    >
-                        <Plus size={18} /> NEW CHAT
-                    </button>
-
-                    {/* 会话列表 */}
-                    <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2">
-                        {sessions.map(session => (
-                            <div
-                                key={session.id}
-                                onClick={() => switchSession(session.id)}
-                                className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-300 ${
-                                    chatId === session.id
-                                        ? 'bg-blue-500/20 border border-blue-500/30 text-blue-100 shadow-[0_0_15px_rgba(59,130,246,0.15)]'
-                                        : 'text-slate-400 hover:bg-white/5 border border-transparent hover:text-slate-200'
-                                }`}
-                            >
-                                <MessageSquare size={16} className={chatId === session.id ? "text-blue-400" : "text-slate-500"} />
-                                <span className="font-sans text-sm tracking-wide truncate flex-1">
-                                    {session.title || 'New Conversation'}
-                                </span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            </div>
+            {/* --- 左侧边栏 (抽离为独立组件) --- */}
+            <SessionSidebar
+                isSidebarOpen={isSidebarOpen}
+                currentChatId={chatId}
+                onSessionSelect={handleSessionSelect}
+                onNewSession={handleNewSession}
+                token={token}
+            />
 
             {/* --- 右侧聊天主区域 --- */}
             <div className="relative z-10 flex flex-col flex-1 h-screen">
-
-                {/* 顶部工具栏 */}
                 <div className="flex justify-between items-center p-6 w-full">
                     <button
                         onClick={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -371,7 +270,6 @@ export default function ChatPage() {
                     >
                         <Menu size={24} />
                     </button>
-
                     <button
                         onClick={() => navigateWithTransition('/')}
                         className="text-white/40 hover:text-white vn-text-shadow text-sm transition-colors cursor-pointer font-sans tracking-widest"
@@ -380,10 +278,7 @@ export default function ChatPage() {
                     </button>
                 </div>
 
-                {/* 核心聊天容器 */}
                 <div className="flex-1 overflow-hidden flex flex-col w-full max-w-5xl mx-auto px-8 md:px-16 pb-12">
-
-                    {/* 消息流区域 (还原为你本来的代码) */}
                     <div className="flex-1 overflow-y-auto custom-scrollbar pb-8 pr-2">
                         <div className="flex flex-col space-y-6">
                             {messages.map((msg) => (
@@ -399,7 +294,6 @@ export default function ChatPage() {
                         </div>
                     </div>
 
-                    {/* 底部输入框区域 (还原为你本来的代码) */}
                     <div className={`mt-4 pt-4 border-t transition-colors duration-500 w-full ${
                         agentQuestion ? 'border-yellow-400/50' : (isExpertMode ? 'border-blue-500/50' : 'border-white/10')
                     }`}>
@@ -417,10 +311,9 @@ export default function ChatPage() {
                                 disabled={isSending || agentQuestion}
                                 className={`text-xs font-sans tracking-widest px-3 py-1 rounded transition-all duration-300 border ${
                                     isExpertMode
-                                        ? 'border-blue-500 text-blue-300 bg-blue-500/20 shadow-[0_0_10px_rgba(168,85,247,0.4)]'
+                                        ? 'border-blue-500 text-blue-300 bg-blue-500/20 shadow-[0_0_10px_rgba(59,130,246,0.4)]'
                                         : 'border-slate-500/50 text-slate-400 hover:text-slate-200 hover:border-slate-400'
                                 } ${isSending || agentQuestion ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                                title="Toggle Multi-Agent Expert Routing"
                             >
                                 {isExpertMode ? '✦ EXPERT COUNCIL' : '✧ STANDARD'}
                             </button>
@@ -432,14 +325,13 @@ export default function ChatPage() {
                             }`}>
                                 &gt;
                             </span>
-
                             <input
                                 type="text"
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
                                 onKeyDown={handleSend}
                                 autoFocus
-                                disabled={isSending || !chatId} // 没获取到chatId时不能发消息
+                                disabled={isSending || !chatId}
                                 placeholder={isSending ? "Processing..." : (agentQuestion ? "Type your answer here..." : "Message...")}
                                 className={`flex-1 w-full bg-transparent border-none outline-none text-lg md:text-xl text-white vn-text-shadow placeholder-white/20 font-vn leading-snug tracking-tight caret-transparent cursor-blink ${isSending ? 'opacity-50' : ''}`}
                                 autoComplete="off"
@@ -449,23 +341,11 @@ export default function ChatPage() {
                 </div>
             </div>
 
-            {/* 图片弹窗 Modal (还原为你本来的代码) */}
             {modalImage && (
                 <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/85 backdrop-blur-sm animate-fade-in">
-                    <button
-                        onClick={() => setModalImage(null)}
-                        className="absolute top-6 right-8 text-white/50 hover:text-white text-4xl font-sans transition-colors cursor-pointer"
-                        title="Close"
-                    >
-                        &times;
-                    </button>
-
+                    <button onClick={() => setModalImage(null)} className="absolute top-6 right-8 text-white/50 hover:text-white text-4xl font-sans transition-colors cursor-pointer">&times;</button>
                     <div className="relative max-w-5xl max-h-[85vh] p-4 bg-white/5 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)] border border-white/10">
-                        <img
-                            src={modalImage}
-                            alt="Generated Output"
-                            className="max-w-full max-h-full object-contain rounded-lg"
-                        />
+                        <img src={modalImage} alt="Generated Output" className="max-w-full max-h-full object-contain rounded-lg" />
                     </div>
                 </div>
             )}
