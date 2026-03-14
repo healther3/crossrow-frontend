@@ -3,8 +3,6 @@ import { useSettings } from '../context/SettingsContext';
 import { useTransition } from '../context/TransitionContext';
 import { useAuth } from '../context/AuthContext';
 import { Menu } from 'lucide-react';
-
-// 引入刚剥离出去的侧边栏组件
 import SessionSidebar from '../components/SessionSidebar';
 
 const TYPE_SPEED_MS = 30;
@@ -19,18 +17,13 @@ export default function ChatPage() {
     const [agentQuestion, setAgentQuestion] = useState(null);
     const [isExpertMode, setIsExpertMode] = useState(false);
 
-    // --- 极简的会话状态 ---
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [chatId, setChatId] = useState(null);
 
     const { bgConfig } = useSettings();
     const { userId, token } = useAuth();
 
-    const [messages, setMessages] = useState([
-        { id: 1, text: "Wait... where am I?", sender: "user" },
-        { id: 2, text: "You have arrived. This is the boundary of consciousness.", sender: "ai" },
-        { id: 3, text: "The noise of the world fades away here.", sender: "ai" },
-    ]);
+    const [messages, setMessages] = useState([]);
 
     const targetTextRef = useRef("");
     const displayedIndexRef = useRef(0);
@@ -42,26 +35,93 @@ export default function ChatPage() {
     const baseUrlAPI = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8123';
 
     // ==========================================
-    // 侧边栏回调逻辑 (只负责清屏，不处理数据请求)
+    // 核心新增：加载并解析真实的历史记录
+    // ==========================================
+    const loadChatHistory = async (targetChatId) => {
+        try {
+            const response = await fetch(`${baseUrlAPI}/api/sessions/${targetChatId}/history`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+
+            if (response.ok) {
+                const historyData = await response.json();
+
+                // 如果没记录，显示默认开场白
+                if (!historyData || historyData.length === 0) {
+                    setMessages([
+                        { id: 1, text: "Wait... where am I?", sender: "user" },
+                        { id: 2, text: "You have arrived. This is the boundary of consciousness.", sender: "ai" },
+                        { id: 3, text: "The noise of the world fades away here.", sender: "ai" },
+                    ]);
+                    return;
+                }
+
+                // 核心：把后端的 JSON 格式映射为前端需要的格式
+                const formattedMessages = historyData.map((item, index) => ({
+                    id: Date.now() + index, // 生成唯一标识
+                    text: item.content,
+                    sender: item.role === 'user' ? 'user' : 'ai' // 除了 user 全算作 ai
+                }));
+
+                setMessages(formattedMessages);
+            } else {
+                setMessages([{ id: Date.now(), text: "[System]: Error loading memory.", sender: "ai" }]);
+            }
+        } catch (error) {
+            console.error("Error fetching history:", error);
+            setMessages([{ id: Date.now(), text: "[System]: Network anomaly detected.", sender: "ai" }]);
+        }
+    };
+
+    // ==========================================
+    // 修复：严谨的侧边栏切换逻辑
     // ==========================================
     const handleSessionSelect = (selectedId) => {
-        if (chatId === selectedId) return;
-        setChatId(selectedId);
-        // ⚠️ 未来调用 GET /messages/{selectedId} 加载历史记录，目前仅做清屏
-        setMessages([
-            { id: 1, text: "[System]: Loading historical records...", sender: "ai" }
-        ]);
+        if (chatId === selectedId) return; // 点自己不触发
+
+        // 1. 强制阻断：关闭上一个可能正在生成的请求，防止数据串流
+        if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
+        }
+        setIsSending(false);
+        setAgentQuestion(null);
+
+        // 2. 彻底重置打字机，防止上一句没打完的字出现在新会话里！
+        currentMsgIdRef.current = null;
+        targetTextRef.current = "";
+        displayedIndexRef.current = 0;
         stepContentsRef.current.clear();
+
+        // 3. 切换状态，显示 Loading
+        setChatId(selectedId);
+        setMessages([
+            { id: Date.now(), text: "[System]: Accessing memory archives...", sender: "ai" }
+        ]);
+
+        // 4. 发起真实网络请求拉取数据
+        loadChatHistory(selectedId);
     };
 
     const handleNewSession = (newId) => {
+        // 新建会话同样需要严谨重置
+        if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
+        }
+        setIsSending(false);
+        setAgentQuestion(null);
+        currentMsgIdRef.current = null;
+        targetTextRef.current = "";
+        displayedIndexRef.current = 0;
+        stepContentsRef.current.clear();
+
         setChatId(newId);
         setMessages([
             { id: 1, text: "Wait... where am I?", sender: "user" },
             { id: 2, text: "You have arrived. This is the boundary of consciousness.", sender: "ai" },
             { id: 3, text: "The noise of the world fades away here.", sender: "ai" },
         ]);
-        stepContentsRef.current.clear();
     };
 
     // 背景图获取逻辑
@@ -115,7 +175,6 @@ export default function ChatPage() {
         fetchBackgroundUrl();
     }, [bgConfig, userId, token, baseUrlAPI]);
 
-    // 自动滚动 & 清理 EventSource
     useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
     useEffect(() => {
         return () => { if (eventSourceRef.current) eventSourceRef.current.close(); };
@@ -155,7 +214,7 @@ export default function ChatPage() {
     // 核心发送逻辑
     const handleSend = (e) => {
         if (e.key === 'Enter' && input.trim() && !isSending && !e.nativeEvent.isComposing) {
-            if (!chatId) return; // 没拿到会话ID不允许发送
+            if (!chatId) return;
 
             setIsSending(true);
             setAgentQuestion(null);
@@ -252,7 +311,7 @@ export default function ChatPage() {
                 <div className="absolute inset-0 bg-gradient-to-b from-slate-900/60 via-slate-900/40 to-slate-900/90 backdrop-blur-[1px]" />
             </div>
 
-            {/* --- 左侧边栏 (抽离为独立组件) --- */}
+            {/* --- 左侧边栏 --- */}
             <SessionSidebar
                 isSidebarOpen={isSidebarOpen}
                 currentChatId={chatId}
