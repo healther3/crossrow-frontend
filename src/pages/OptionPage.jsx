@@ -1,16 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import { useSettings } from '../context/SettingsContext';
 import { useTransition } from '../context/TransitionContext';
-import { useAuth } from '../context/AuthContext'; // 引入 auth 以获取 token
+import { useAuth } from '../context/AuthContext';
 
-// 复用的选项按钮组件
-const OptionButton = ({ label, isSelected, onClick, size = "text-1xl" }) => {
+// 复用的选项按钮组件 (稍微缩小了左右 Padding 节省空间)
+const OptionButton = ({ label, isSelected, onClick, size = "text-lg md:text-xl" }) => {
     return (
         <button
             onClick={onClick}
-            className="group relative px-8 py-2 overflow-hidden transition-all duration-300 hover:scale-105 cursor-pointer"
+            className="group relative px-4 md:px-6 py-2 overflow-hidden transition-all duration-300 hover:scale-105 cursor-pointer"
         >
             <span
                 className={`relative z-10 font-serif ${size} transition-colors duration-300 
@@ -38,14 +38,42 @@ export default function OptionPage() {
     const navigate = useNavigate();
     const { navigateWithTransition } = useTransition();
     const { bgConfig, updateMode, updateCoords } = useSettings();
-    const { token } = useAuth(); // 获取 JWT Token 用来上传图片
+    const { token } = useAuth();
 
+    const baseUrlAPI = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8123';
+
+    // --- 背景相关的状态 ---
     const [tempMode, setTempMode] = useState(bgConfig.mode);
     const [locationStatus, setLocationStatus] = useState('');
-
-    // 自定义上传的状态
     const [isUploading, setIsUploading] = useState(false);
     const [uploadMsg, setUploadMsg] = useState('');
+
+    // --- 模型偏好相关的状态 ---
+    const [availableModels, setAvailableModels] = useState([]);
+    const [tempModel, setTempModel] = useState('');
+    const [originalModel, setOriginalModel] = useState('');
+    const [isSaving, setIsSaving] = useState(false);
+
+    useEffect(() => {
+        const fetchModelPreference = async () => {
+            if (!token) return;
+            try {
+                const response = await fetch(`${baseUrlAPI}/api/user/model-preference`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    setAvailableModels(data.availableModels || []);
+                    setTempModel(data.currentModel || '');
+                    setOriginalModel(data.currentModel || '');
+                }
+            } catch (error) {
+                console.error("Failed to fetch model preferences:", error);
+            }
+        };
+
+        fetchModelPreference();
+    }, [token, baseUrlAPI]);
 
     // --- GPS 获取逻辑 ---
     const handleLocationRequest = () => {
@@ -75,11 +103,10 @@ export default function OptionPage() {
         const file = e.target.files[0];
         if (!file) return;
 
-        // --- 新增：前端文件大小校验 (这里限制为 5MB) ---
         const MAX_SIZE_MB = 5;
         if (file.size > MAX_SIZE_MB * 1024 * 1024) {
             setUploadMsg(`Error: Image is too large. Please select a file under ${MAX_SIZE_MB}MB.`);
-            e.target.value = null; // 清空选择
+            e.target.value = null;
             return;
         }
 
@@ -87,22 +114,21 @@ export default function OptionPage() {
         setUploadMsg("Uploading to cloud storage...");
 
         const formData = new FormData();
-        formData.append("file", file); // 对应后端 @RequestParam("file")
+        formData.append("file", file);
 
         try {
-            const response = await fetch("http://localhost:8123/api/user/background", {
+            const response = await fetch(`${baseUrlAPI}/api/user/background`, {
                 method: "POST",
                 headers: {
                     'Authorization': `Bearer ${token}`
-                    // 注意：这里绝对不能手动设置 Content-Type: multipart/form-data
                 },
                 body: formData
             });
 
             if (response.ok) {
-                const url = await response.text();
+                await response.text();
                 setUploadMsg("Transmission complete. Custom background applied.");
-                setTempMode('CUSTOM'); // 上传成功后自动切换到 CUSTOM 模式
+                setTempMode('CUSTOM');
             } else {
                 const errorText = await response.text();
                 setUploadMsg(`Error: ${errorText}`);
@@ -115,8 +141,27 @@ export default function OptionPage() {
         }
     };
 
-    const handleSave = () => {
+    // --- 统一保存逻辑 ---
+    const handleSave = async () => {
+        setIsSaving(true);
         updateMode(tempMode);
+
+        if (tempModel && tempModel !== originalModel) {
+            try {
+                await fetch(`${baseUrlAPI}/api/user/model-preference`, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ model: tempModel })
+                });
+            } catch (error) {
+                console.error("Failed to update model preference:", error);
+            }
+        }
+
+        setIsSaving(false);
         if (navigateWithTransition) {
             navigateWithTransition('/');
         } else {
@@ -136,78 +181,107 @@ export default function OptionPage() {
 
             <Navbar />
 
-            <div className="relative z-10 w-full max-w-5xl px-6">
-                <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl p-12 md:p-16 text-center transform transition-all duration-500">
+            {/* 删除了之前的 my-24，改成 py-6，把垂直空间还给卡片 */}
+            <div className="relative z-10 w-full max-w-5xl px-4 md:px-6 py-6 flex justify-center">
 
-                    <h2 className="text-4xl md:text-5xl font-bold text-slate-700 mb-12 tracking-wider vn-title-container">
+                {/* 关键修改：
+                    1. padding 从 p-16 缩小到了 p-8 md:p-10
+                    2. 增加了 max-h-[95vh] overflow-y-auto custom-scrollbar (限制最大高度并允许内部滚动)
+                */}
+                <div className="w-full bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl p-8 md:p-10 text-center transform transition-all duration-500 max-h-[95vh] overflow-y-auto custom-scrollbar">
+
+                    {/* 标题缩小，下边距缩小 */}
+                    <h2 className="text-3xl md:text-4xl font-bold text-slate-700 mb-8 tracking-wider vn-title-container">
                         Configuration
                     </h2>
 
-                    <div className="mb-8">
-                        <p className="text-slate-400 text-lg mb-6 uppercase tracking-[0.2em]">
+                    {/* ==================================== */}
+                    {/* 模块 1：背景设置                     */}
+                    {/* ==================================== */}
+                    <div className="mb-6">
+                        <p className="text-slate-400 text-base md:text-lg mb-4 uppercase tracking-[0.2em]">
                             - Background Source -
                         </p>
 
-                        <div className="flex flex-wrap justify-center items-center gap-4 md:gap-8">
+                        <div className="flex flex-wrap justify-center items-center gap-2 md:gap-4">
                             <OptionButton label="Random" isSelected={tempMode === 'RANDOM'} onClick={() => selectTheme('RANDOM')} />
                             <OptionButton label="Nature" isSelected={tempMode === 'NATURE'} onClick={() => selectTheme('NATURE')} />
                             <OptionButton label="Urban" isSelected={tempMode === 'URBAN'} onClick={() => selectTheme('URBAN')} />
                             <OptionButton label="Landmark" isSelected={tempMode === 'LANDMARK'} onClick={() => selectTheme('LANDMARK')} />
 
-                            <div className="hidden md:block w-px h-8 bg-slate-300/50" />
+                            <div className="hidden md:block w-px h-6 bg-slate-300/50" />
 
                             <OptionButton label="Local (GPS)" isSelected={tempMode === 'USER'} onClick={handleLocationRequest} />
 
-                            <div className="hidden md:block w-px h-8 bg-slate-300/50" />
+                            <div className="hidden md:block w-px h-6 bg-slate-300/50" />
 
-                            {/* 新增的 Custom 按钮 */}
                             <OptionButton label="Custom" isSelected={tempMode === 'CUSTOM'} onClick={() => selectTheme('CUSTOM')} />
                         </div>
 
-                        {/* 状态提示文字 (GPS) */}
-                        <div className="h-6 mt-4 flex items-center justify-center">
-                            <span className={`text-sm font-sans tracking-wide transition-opacity duration-300 ${locationStatus ? 'opacity-100 text-blue-500' : 'opacity-0'}`}>
+                        <div className="h-5 mt-2 flex items-center justify-center">
+                            <span className={`text-xs md:text-sm font-sans tracking-wide transition-opacity duration-300 ${locationStatus ? 'opacity-100 text-blue-500' : 'opacity-0'}`}>
                                 {locationStatus}
                             </span>
                         </div>
-                    </div>
 
-                    {/* --- 新增：Custom 模式下的上传区域 --- */}
-                    <div className={`transition-all duration-500 overflow-hidden ${tempMode === 'CUSTOM' ? 'max-h-40 opacity-100' : 'max-h-0 opacity-0'}`}>
-                        <div className="flex flex-col items-center p-6 bg-slate-50/50 rounded-xl border border-slate-200/50 mx-auto max-w-md">
-                            <input
-                                type="file"
-                                accept="image/*"
-                                id="custom-bg-upload"
-                                className="hidden"
-                                onChange={handleFileUpload}
-                                disabled={isUploading}
-                            />
-                            {/* 复古风伪装按钮 */}
-                            <label
-                                htmlFor="custom-bg-upload"
-                                className={`group relative px-6 py-2 border border-slate-300 rounded hover:border-blue-400 transition-colors ${isUploading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                            >
-                                <span className="font-sans text-sm tracking-widest text-slate-500 group-hover:text-blue-500 transition-colors">
-                                    {isUploading ? '[ UPLOADING... ]' : '[ SELECT IMAGE ]'}
-                                </span>
-                            </label>
-
-                            {/* 提示信息 */}
-                            <span className="mt-4 text-xs font-sans tracking-wide text-blue-400">
-                                {uploadMsg || (
-                                    <span className="text-slate-400">
-                                        Data is empty. Upload an image to initialize your world.
+                        <div className={`transition-all duration-500 overflow-hidden ${tempMode === 'CUSTOM' ? 'max-h-40 opacity-100' : 'max-h-0 opacity-0'}`}>
+                            <div className="flex flex-col items-center p-4 md:p-6 bg-slate-50/50 rounded-xl border border-slate-200/50 mx-auto max-w-md mt-2">
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    id="custom-bg-upload"
+                                    className="hidden"
+                                    onChange={handleFileUpload}
+                                    disabled={isUploading}
+                                />
+                                <label
+                                    htmlFor="custom-bg-upload"
+                                    className={`group relative px-6 py-2 border border-slate-300 rounded hover:border-blue-400 transition-colors ${isUploading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                                >
+                                    <span className="font-sans text-xs md:text-sm tracking-widest text-slate-500 group-hover:text-blue-500 transition-colors">
+                                        {isUploading ? '[ UPLOADING... ]' : '[ SELECT IMAGE ]'}
                                     </span>
-                                )}
-                            </span>
+                                </label>
+                                <span className="mt-3 text-xs font-sans tracking-wide text-blue-400">
+                                    {uploadMsg || <span className="text-slate-400">Upload an image to initialize your world.</span>}
+                                </span>
+                            </div>
                         </div>
                     </div>
 
-                    {/* 底部操作栏 */}
-                    <div className="flex justify-center gap-12 mt-10 pt-8 border-t border-slate-100">
-                        <OptionButton label="Confirm" isSelected={false} size="text-xl" onClick={handleSave} />
-                        <OptionButton label="Cancel" isSelected={false} size="text-xl" onClick={() => navigate('/')} />
+                    {/* 分割线间距缩小 */}
+                    <div className="w-2/3 mx-auto border-t border-slate-200/50 my-6"></div>
+
+                    {/* ==================================== */}
+                    {/* 模块 2：AI 模型选择                  */}
+                    {/* ==================================== */}
+                    <div className="mb-4">
+                        <p className="text-slate-400 text-base md:text-lg mb-4 uppercase tracking-[0.2em]">
+                            - Neural Core -
+                        </p>
+
+                        {availableModels.length > 0 ? (
+                            <div className="flex flex-wrap justify-center items-center gap-2 md:gap-4">
+                                {availableModels.map((modelName) => (
+                                    <OptionButton
+                                        key={modelName}
+                                        label={modelName}
+                                        isSelected={tempModel === modelName}
+                                        onClick={() => setTempModel(modelName)}
+                                    />
+                                ))}
+                            </div>
+                        ) : (
+                            <p className="text-slate-400 font-sans text-sm">Loading neural pathways...</p>
+                        )}
+                    </div>
+
+                    {/* ==================================== */}
+                    {/* 底部操作栏                           */}
+                    {/* ==================================== */}
+                    <div className="flex justify-center gap-8 mt-8 pt-6 border-t border-slate-100">
+                        <OptionButton label={isSaving ? "Saving..." : "Confirm"} isSelected={false} size="text-lg md:text-xl" onClick={handleSave} />
+                        <OptionButton label="Cancel" isSelected={false} size="text-lg md:text-xl" onClick={() => navigate('/')} />
                     </div>
 
                 </div>

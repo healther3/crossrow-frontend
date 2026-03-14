@@ -8,6 +8,8 @@ import SessionSidebar from '../components/SessionSidebar';
 const TYPE_SPEED_MS = 30;
 const CHARS_PER_TICK = 3;
 
+const MODES = ['PREFERRED', 'AUTO', 'AGENT', 'EXPERT'];
+
 export default function ChatPage() {
     const { navigateWithTransition } = useTransition();
     const bottomRef = useRef(null);
@@ -15,7 +17,10 @@ export default function ChatPage() {
     const [isSending, setIsSending] = useState(false);
     const [modalImage, setModalImage] = useState(null);
     const [agentQuestion, setAgentQuestion] = useState(null);
-    const [isExpertMode, setIsExpertMode] = useState(false);
+
+    const [chatModeIndex, setChatModeIndex] = useState(0);
+    const chatMode = MODES[chatModeIndex];
+    const [preferredModel, setPreferredModel] = useState('STANDARD');
 
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [chatId, setChatId] = useState(null);
@@ -34,9 +39,25 @@ export default function ChatPage() {
     const [bgUrl, setBgUrl] = useState(null);
     const baseUrlAPI = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8123';
 
-    // ==========================================
-    // 核心新增：加载并解析真实的历史记录
-    // ==========================================
+    // 1. 获取用户偏好的模型
+    useEffect(() => {
+        const fetchPref = async () => {
+            if(!token) return;
+            try {
+                const res = await fetch(`${baseUrlAPI}/api/user/model-preference`, {
+                    headers: {'Authorization': `Bearer ${token}`}
+                });
+                if(res.ok) {
+                    const data = await res.json();
+                    if(data.currentModel) setPreferredModel(data.currentModel);
+                }
+            } catch(e) {
+                console.error("Failed to fetch preferred model");
+            }
+        };
+        fetchPref();
+    }, [token, baseUrlAPI]);
+
     const loadChatHistory = async (targetChatId) => {
         try {
             const response = await fetch(`${baseUrlAPI}/api/sessions/${targetChatId}/history`, {
@@ -45,8 +66,6 @@ export default function ChatPage() {
 
             if (response.ok) {
                 const historyData = await response.json();
-
-                // 如果没记录，显示默认开场白
                 if (!historyData || historyData.length === 0) {
                     setMessages([
                         { id: 1, text: "Wait... where am I?", sender: "user" },
@@ -55,31 +74,23 @@ export default function ChatPage() {
                     ]);
                     return;
                 }
-
-                // 核心：把后端的 JSON 格式映射为前端需要的格式
                 const formattedMessages = historyData.map((item, index) => ({
-                    id: Date.now() + index, // 生成唯一标识
+                    id: Date.now() + index,
                     text: item.content,
-                    sender: item.role === 'user' ? 'user' : 'ai' // 除了 user 全算作 ai
+                    sender: item.role === 'user' ? 'user' : 'ai'
                 }));
-
                 setMessages(formattedMessages);
             } else {
-                setMessages([{ id: Date.now(), text: "[System]: Error loading memory.", sender: "ai" }]);
+                setMessages([{ id: Date.now(), text: "[System]: Error loading memory.", sender: "system" }]);
             }
         } catch (error) {
-            console.error("Error fetching history:", error);
-            setMessages([{ id: Date.now(), text: "[System]: Network anomaly detected.", sender: "ai" }]);
+            setMessages([{ id: Date.now(), text: "[System]: Network anomaly detected.", sender: "system" }]);
         }
     };
 
-    // ==========================================
-    // 修复：严谨的侧边栏切换逻辑
-    // ==========================================
     const handleSessionSelect = (selectedId) => {
-        if (chatId === selectedId) return; // 点自己不触发
+        if (chatId === selectedId) return;
 
-        // 1. 强制阻断：关闭上一个可能正在生成的请求，防止数据串流
         if (eventSourceRef.current) {
             eventSourceRef.current.close();
             eventSourceRef.current = null;
@@ -87,24 +98,19 @@ export default function ChatPage() {
         setIsSending(false);
         setAgentQuestion(null);
 
-        // 2. 彻底重置打字机，防止上一句没打完的字出现在新会话里！
         currentMsgIdRef.current = null;
         targetTextRef.current = "";
         displayedIndexRef.current = 0;
         stepContentsRef.current.clear();
 
-        // 3. 切换状态，显示 Loading
         setChatId(selectedId);
         setMessages([
-            { id: Date.now(), text: "[System]: Accessing memory archives...", sender: "ai" }
+            { id: Date.now(), text: "[System]: Accessing memory archives...", sender: "system" }
         ]);
-
-        // 4. 发起真实网络请求拉取数据
         loadChatHistory(selectedId);
     };
 
     const handleNewSession = (newId) => {
-        // 新建会话同样需要严谨重置
         if (eventSourceRef.current) {
             eventSourceRef.current.close();
             eventSourceRef.current = null;
@@ -124,24 +130,18 @@ export default function ChatPage() {
         ]);
     };
 
-    // 背景图获取逻辑
+    // 背景图获取逻辑...
     useEffect(() => {
         const fetchBackgroundUrl = async () => {
             try {
                 let mode = bgConfig?.mode || 'RANDOM';
-
-                if (mode === 'USER' && (!bgConfig?.coords || !bgConfig.coords.lat)) {
-                    mode = 'RANDOM';
-                }
+                if (mode === 'USER' && (!bgConfig?.coords || !bgConfig.coords.lat)) mode = 'RANDOM';
 
                 if (mode === 'CUSTOM') {
                     const response = await fetch(`${baseUrlAPI}/api/user/background`, {
-                        method: "GET",
                         headers: { 'Authorization': `Bearer ${token}` }
                     });
-                    if (response.ok) {
-                        setBgUrl(await response.text());
-                    }
+                    if (response.ok) setBgUrl(await response.text());
                     return;
                 }
 
@@ -149,7 +149,6 @@ export default function ChatPage() {
                 const params = new URLSearchParams();
                 params.append("userId", userId);
                 params.append("mode", mode);
-
                 if (mode === 'USER' && bgConfig?.coords) {
                     params.append("lat", bgConfig.coords.lat);
                     params.append("lng", bgConfig.coords.lng);
@@ -161,17 +160,11 @@ export default function ChatPage() {
 
                 if (response.ok) {
                     const urlString = await response.text();
-                    if (urlString && urlString.startsWith('http')) {
-                        setBgUrl(urlString);
-                    } else if (urlString && urlString.startsWith('/api')) {
-                        setBgUrl(`${baseUrlAPI}${urlString}`);
-                    }
+                    if (urlString && urlString.startsWith('http')) setBgUrl(urlString);
+                    else if (urlString && urlString.startsWith('/api')) setBgUrl(`${baseUrlAPI}${urlString}`);
                 }
-            } catch (error) {
-                console.error("Error fetching background:", error);
-            }
+            } catch (error) {}
         };
-
         fetchBackgroundUrl();
     }, [bgConfig, userId, token, baseUrlAPI]);
 
@@ -184,10 +177,7 @@ export default function ChatPage() {
     useEffect(() => {
         const timer = setInterval(() => {
             if (currentMsgIdRef.current && displayedIndexRef.current < targetTextRef.current.length) {
-                const nextIndex = Math.min(
-                    displayedIndexRef.current + CHARS_PER_TICK,
-                    targetTextRef.current.length
-                );
+                const nextIndex = Math.min(displayedIndexRef.current + CHARS_PER_TICK, targetTextRef.current.length);
                 const displayText = targetTextRef.current.slice(0, nextIndex);
                 setMessages(prev => {
                     const newMessages = [...prev];
@@ -203,16 +193,16 @@ export default function ChatPage() {
         return () => clearInterval(timer);
     }, []);
 
-    const rebuildTargetText = () => {
-        const sortedSteps = Array.from(stepContentsRef.current.entries())
-            .sort((a, b) => a[0] - b[0]);
-        targetTextRef.current = sortedSteps
-            .map(([_, content]) => content.replace(/\\n/g, '\n'))
-            .join("\n\n");
+    // 【修改点】：增加 joiner 参数，兼容不同的换行需求
+    const rebuildTargetText = (joiner = "") => {
+        const sortedSteps = Array.from(stepContentsRef.current.entries()).sort((a, b) => Number(a[0]) - Number(b[0]));
+        targetTextRef.current = sortedSteps.map(([_, content]) => content.replace(/\\n/g, '\n')).join(joiner);
     };
 
-    // 核心发送逻辑
-    const handleSend = (e) => {
+    // ==========================================
+    // 发送逻辑
+    // ==========================================
+    const handleSend = async (e) => {
         if (e.key === 'Enter' && input.trim() && !isSending && !e.nativeEvent.isComposing) {
             if (!chatId) return;
 
@@ -233,72 +223,146 @@ export default function ChatPage() {
 
             setMessages(prev => [
                 ...prev,
-                { id: userMsgId, text: userText, sender: "user" },
-                { id: aiMsgId, text: "", sender: "ai" }
+                { id: userMsgId, text: userText, sender: "user" }
             ]);
 
-            const endpoint = isExpertMode ? 'expert/chat' : 'agent/chat';
-            const url = `${baseUrlAPI}/api/crossrow/${endpoint}?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&token=${token}`;
+            let finalUrl = '';
 
-            const eventSource = new EventSource(url);
-            eventSourceRef.current = eventSource;
+            try {
+                if (chatMode === 'EXPERT') {
+                    const preRes = await fetch(`${baseUrlAPI}/api/crossrow/expert/preview?message=${encodeURIComponent(userText)}`, { headers: { 'Authorization': `Bearer ${token}` } });
+                    if(preRes.ok) {
+                        const expertName = await preRes.text();
+                        setMessages(prev => [...prev, { id: Date.now() + 2, text: `[System Log]: Routing query to specialist [ ${expertName.toUpperCase()} ]`, sender: "system" }]);
+                    }
+                    finalUrl = `${baseUrlAPI}/api/crossrow/expert/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&token=${token}`;
 
-            const processDataWithHiddenActions = (rawData) => {
-                let cleanedData = rawData;
-                if (cleanedData.startsWith('"') && cleanedData.endsWith('"')) {
-                    try { cleanedData = JSON.parse(cleanedData); } catch(e) {}
+                } else if (chatMode === 'AUTO') {
+                    const decisionRes = await fetch(`${baseUrlAPI}/api/crossrow/route/decision?message=${encodeURIComponent(userText)}`, { headers: { 'Authorization': `Bearer ${token}` } });
+                    if(decisionRes.ok) {
+                        const decision = await decisionRes.json();
+                        const model = decision.selectedModel || decision.model || 'Optimal Framework';
+                        const reason = decision.taskReview?.reason || decision.reason || 'Complexity Evaluated';
+                        setMessages(prev => [...prev, { id: Date.now() + 2, text: `[Auto-Selection Trace]:\n- Analysis: ${reason}\n- Deployed Core: [ ${model} ]`, sender: "system" }]);
+                    }
+                    finalUrl = `${baseUrlAPI}/api/crossrow/chat/auto-route/sse?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&token=${token}`;
+
+                } else if (chatMode === 'PREFERRED') {
+                    finalUrl = `${baseUrlAPI}/api/crossrow/chat/model/sse?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&model=${preferredModel}&token=${token}`;
+                } else {
+                    finalUrl = `${baseUrlAPI}/api/crossrow/agent/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&token=${token}`;
                 }
 
-                const actionRegex = /<hidden_action\s+type=['"]show_image['"]\s+url=['"](.*?)['"]\s*\/>/gi;
-                let match;
-                while ((match = actionRegex.exec(cleanedData)) !== null) {
-                    const gcsUrl = match[1];
-                    setTimeout(() => { setModalImage(gcsUrl); }, 800);
-                }
-                cleanedData = cleanedData.replace(actionRegex, '').trim();
+                setMessages(prev => [...prev, { id: aiMsgId, text: "", sender: "ai" }]);
 
-                const askRegex = /<hidden_action\s+type=['"]ask_human['"]\s+question=['"](.*?)['"]\s*\/>/gi;
-                let askMatch;
-                while ((askMatch = askRegex.exec(cleanedData)) !== null) {
-                    const questionText = askMatch[1];
-                    setTimeout(() => { setAgentQuestion(questionText); }, 500);
-                }
-                cleanedData = cleanedData.replace(askRegex, '');
-                cleanedData = cleanedData.replace('(Waiting for user input...)', '');
+                const eventSource = new EventSource(finalUrl);
+                eventSourceRef.current = eventSource;
 
-                return cleanedData.trim();
-            };
+                // 【新增】：由于 Flux 返回的数据切片很快，我们用一个计数器来确保顺序
+                let chunkCounter = 0;
 
-            eventSource.addEventListener("step", (event) => {
-                const stepId = event.lastEventId ? parseInt(event.lastEventId, 10) : Date.now();
-                const cleanedData = processDataWithHiddenActions(event.data);
-                if (!isNaN(stepId)) {
-                    stepContentsRef.current.set(stepId, cleanedData);
-                    rebuildTargetText();
-                }
-            });
+                const processDataWithHiddenActions = (rawData) => {
+                    let cleanedData = rawData;
+                    if (cleanedData.startsWith('"') && cleanedData.endsWith('"')) {
+                        try { cleanedData = JSON.parse(cleanedData); } catch(e) {}
+                    }
 
-            eventSource.addEventListener("complete", (event) => {
-                const cleanedData = processDataWithHiddenActions(event.data);
-                const completeId = 999999;
-                if (!stepContentsRef.current.has(completeId)) {
-                    stepContentsRef.current.set(completeId, cleanedData);
-                    rebuildTargetText();
-                }
-            });
+                    const actionRegex = /<hidden_action\s+type=['"]show_image['"]\s+url=['"](.*?)['"]\s*\/>/gi;
+                    let match;
+                    while ((match = actionRegex.exec(cleanedData)) !== null) {
+                        const gcsUrl = match[1];
+                        setTimeout(() => { setModalImage(gcsUrl); }, 800);
+                    }
+                    cleanedData = cleanedData.replace(actionRegex, '');
 
-            eventSource.onerror = (err) => {
-                eventSource.close();
+                    const askRegex = /<hidden_action\s+type=['"]ask_human['"]\s+question=['"](.*?)['"]\s*\/>/gi;
+                    let askMatch;
+                    while ((askMatch = askRegex.exec(cleanedData)) !== null) {
+                        const questionText = askMatch[1];
+                        setTimeout(() => { setAgentQuestion(questionText); }, 500);
+                    }
+                    cleanedData = cleanedData.replace(askRegex, '');
+                    cleanedData = cleanedData.replace('(Waiting for user input...)', '');
+
+                    // 【关键修复】：去掉了 .trim()！绝对不能吞噬切片中的空格！
+                    return cleanedData;
+                };
+
+                // 【关键修复】：新增对 Flux<String> 的默认流 (onmessage) 的支持
+                eventSource.onmessage = (event) => {
+                    const cleanedData = processDataWithHiddenActions(event.data);
+                    if (cleanedData !== null && cleanedData !== undefined) {
+                        stepContentsRef.current.set(chunkCounter++, cleanedData);
+                        rebuildTargetText(""); // 对于纯切片流，使用空字符串无缝拼接
+                    }
+                };
+
+                // 原有支持 SseEmitter 的 "step" 流
+                eventSource.addEventListener("step", (event) => {
+                    const stepId = event.lastEventId ? parseInt(event.lastEventId, 10) : chunkCounter++;
+                    const cleanedData = processDataWithHiddenActions(event.data);
+                    if (!isNaN(stepId)) {
+                        stepContentsRef.current.set(stepId, cleanedData);
+                        rebuildTargetText("\n\n");
+                    }
+                });
+
+                eventSource.addEventListener("complete", (event) => {
+                    const cleanedData = processDataWithHiddenActions(event.data);
+                    const completeId = 99999999999;
+                    if (!stepContentsRef.current.has(completeId)) {
+                        stepContentsRef.current.set(completeId, cleanedData);
+                        rebuildTargetText("");
+                    }
+                });
+
+                eventSource.onerror = (err) => {
+                    eventSource.close();
+                    setIsSending(false);
+                    eventSourceRef.current = null;
+                };
+
+            } catch (err) {
+                console.error("Fetch API error:", err);
                 setIsSending(false);
-                eventSourceRef.current = null;
-            };
+            }
         }
     };
 
+    let modeLabel = '';
+    let modeStyle = '';
+    let inputBorder = '';
+    let inputArrow = '';
+
+    switch(chatMode) {
+        case 'PREFERRED':
+            modeLabel = `✧ ${preferredModel.toUpperCase()}`;
+            modeStyle = 'border-slate-500/50 text-slate-400 hover:text-slate-200 hover:border-slate-400';
+            inputBorder = 'border-white/10';
+            inputArrow = 'text-white/50';
+            break;
+        case 'AUTO':
+            modeLabel = '⟳ AUTO SELECTION';
+            modeStyle = 'border-cyan-500 text-cyan-300 bg-cyan-500/20 shadow-[0_0_10px_rgba(6,182,212,0.4)]';
+            inputBorder = 'border-cyan-500/50';
+            inputArrow = 'text-cyan-400';
+            break;
+        case 'AGENT':
+            modeLabel = '◈ AGENT';
+            modeStyle = 'border-blue-500 text-blue-300 bg-blue-500/20 shadow-[0_0_10px_rgba(59,130,246,0.4)]';
+            inputBorder = 'border-blue-500/50';
+            inputArrow = 'text-blue-400';
+            break;
+        case 'EXPERT':
+            modeLabel = '✦ EXPERT COUNCIL';
+            modeStyle = 'border-purple-500 text-purple-300 bg-purple-500/20 shadow-[0_0_10px_rgba(168,85,247,0.4)]';
+            inputBorder = 'border-purple-500/50';
+            inputArrow = 'text-purple-400';
+            break;
+    }
+
     return (
         <div className="relative min-h-screen font-vn overflow-hidden flex">
-
-            {/* --- 背景图渲染层 --- */}
             <div className="absolute inset-0 z-0 bg-slate-900">
                 {bgUrl && (
                     <img
@@ -311,7 +375,6 @@ export default function ChatPage() {
                 <div className="absolute inset-0 bg-gradient-to-b from-slate-900/60 via-slate-900/40 to-slate-900/90 backdrop-blur-[1px]" />
             </div>
 
-            {/* --- 左侧边栏 --- */}
             <SessionSidebar
                 isSidebarOpen={isSidebarOpen}
                 currentChatId={chatId}
@@ -320,19 +383,12 @@ export default function ChatPage() {
                 token={token}
             />
 
-            {/* --- 右侧聊天主区域 --- */}
             <div className="relative z-10 flex flex-col flex-1 h-screen">
                 <div className="flex justify-between items-center p-6 w-full">
-                    <button
-                        onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                        className="text-white/40 hover:text-white transition-colors p-2 hover:bg-white/10 rounded-lg cursor-pointer"
-                    >
+                    <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="text-white/40 hover:text-white transition-colors p-2 hover:bg-white/10 rounded-lg cursor-pointer">
                         <Menu size={24} />
                     </button>
-                    <button
-                        onClick={() => navigateWithTransition('/')}
-                        className="text-white/40 hover:text-white vn-text-shadow text-sm transition-colors cursor-pointer font-sans tracking-widest"
-                    >
+                    <button onClick={() => navigateWithTransition('/')} className="text-white/40 hover:text-white vn-text-shadow text-sm transition-colors cursor-pointer font-sans tracking-widest">
                         [ Return ]
                     </button>
                 </div>
@@ -343,7 +399,9 @@ export default function ChatPage() {
                             {messages.map((msg) => (
                                 <div key={msg.id} className="animate-fade-in w-full text-left">
                                     <p className={`text-lg md:text-xl leading-snug tracking-tight vn-text-shadow break-words whitespace-pre-wrap ${
-                                        msg.sender === 'user' ? 'text-cyan-200' : 'text-white'
+                                        msg.sender === 'user' ? 'text-cyan-200' :
+                                            msg.sender === 'system' ? 'text-green-400/80 font-mono text-sm border-l-2 border-green-500/50 pl-3 my-2 shadow-[0_0_10px_rgba(34,197,94,0.1)]' :
+                                                'text-white'
                                     }`}>
                                         {msg.text}
                                     </p>
@@ -353,9 +411,7 @@ export default function ChatPage() {
                         </div>
                     </div>
 
-                    <div className={`mt-4 pt-4 border-t transition-colors duration-500 w-full ${
-                        agentQuestion ? 'border-yellow-400/50' : (isExpertMode ? 'border-blue-500/50' : 'border-white/10')
-                    }`}>
+                    <div className={`mt-4 pt-4 border-t transition-colors duration-500 w-full ${agentQuestion ? 'border-yellow-400/50' : inputBorder}`}>
                         <div className="flex justify-between items-end mb-2 min-h-[24px]">
                             <div>
                                 {agentQuestion && (
@@ -366,22 +422,16 @@ export default function ChatPage() {
                             </div>
 
                             <button
-                                onClick={() => setIsExpertMode(!isExpertMode)}
+                                onClick={() => setChatModeIndex((prev) => (prev + 1) % MODES.length)}
                                 disabled={isSending || agentQuestion}
-                                className={`text-xs font-sans tracking-widest px-3 py-1 rounded transition-all duration-300 border ${
-                                    isExpertMode
-                                        ? 'border-blue-500 text-blue-300 bg-blue-500/20 shadow-[0_0_10px_rgba(59,130,246,0.4)]'
-                                        : 'border-slate-500/50 text-slate-400 hover:text-slate-200 hover:border-slate-400'
-                                } ${isSending || agentQuestion ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                                className={`text-xs font-sans tracking-widest px-3 py-1 rounded transition-all duration-300 border ${modeStyle} ${isSending || agentQuestion ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                             >
-                                {isExpertMode ? '✦ EXPERT COUNCIL' : '✧ STANDARD'}
+                                {modeLabel}
                             </button>
                         </div>
 
                         <div className="flex items-center w-full">
-                            <span className={`text-lg md:text-xl vn-text-shadow mr-2 font-bold transition-colors ${
-                                agentQuestion ? 'text-yellow-400' : (isExpertMode ? 'text-blue-400' : 'text-white/50')
-                            }`}>
+                            <span className={`text-lg md:text-xl vn-text-shadow mr-2 font-bold transition-colors ${agentQuestion ? 'text-yellow-400' : inputArrow}`}>
                                 &gt;
                             </span>
                             <input
