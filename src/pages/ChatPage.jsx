@@ -31,6 +31,8 @@ export default function ChatPage() {
     const { bgConfig } = useSettings();
     const { userId, token } = useAuth();
 
+    const [isBlurEnabled] = useState(() => localStorage.getItem('crossrow_bg_blur') !== 'false');
+
     const [messages, setMessages] = useState([]);
 
     const targetTextRef = useRef("");
@@ -112,24 +114,45 @@ export default function ChatPage() {
     useEffect(() => {
         const fetchBackgroundUrl = async () => {
             try {
-                let mode = bgConfig?.mode || 'RANDOM';
+                // 1. 【微调】：将没有任何配置时的兜底模式从 'RANDOM' 改为 'DEFAULT'
+                let mode = bgConfig?.mode || 'DEFAULT';
+
                 if (mode === 'USER' && (!bgConfig?.coords || !bgConfig.coords.lat)) mode = 'RANDOM';
+
                 if (mode === 'CUSTOM') {
                     const response = await fetch(`${baseUrlAPI}/api/user/background`, { headers: { 'Authorization': `Bearer ${token}` } });
                     if (response.ok) setBgUrl(await response.text());
                     return;
                 }
+
                 const baseUrl = `${baseUrlAPI}/api/crossrow/image/background`;
                 const params = new URLSearchParams();
-                params.append("userId", userId); params.append("mode", mode);
-                if (mode === 'USER' && bgConfig?.coords) { params.append("lat", bgConfig.coords.lat); params.append("lng", bgConfig.coords.lng); }
+                params.append("userId", userId);
+                params.append("mode", mode);
+
+                if (mode === 'USER' && bgConfig?.coords) {
+                    params.append("lat", bgConfig.coords.lat);
+                    params.append("lng", bgConfig.coords.lng);
+                }
+
                 const response = await fetch(`${baseUrl}?${params.toString()}`, { headers: { 'Authorization': `Bearer ${token}` } });
                 if (response.ok) {
                     const urlString = await response.text();
-                    if (urlString && urlString.startsWith('http')) setBgUrl(urlString);
-                    else if (urlString && urlString.startsWith('/api')) setBgUrl(`${baseUrlAPI}${urlString}`);
+                    if (urlString) {
+                        // 2. 【微调】：极其强壮的路径解析逻辑
+                        if (urlString.startsWith('http')) {
+                            // 如果后端直接返回了完整的 http 绝对路径
+                            setBgUrl(urlString);
+                        } else if (urlString.startsWith('/')) {
+                            // 如果后端返回的是 "/images/default_BG.jpg" 这种相对路径
+                            // 前端会自动把它和 http://localhost:8123 拼起来
+                            setBgUrl(`${baseUrlAPI}${urlString}`);
+                        }
+                    }
                 }
-            } catch (error) {}
+            } catch (error) {
+                console.error("Failed to fetch background:", error);
+            }
         };
         fetchBackgroundUrl();
     }, [bgConfig, userId, token, baseUrlAPI]);
@@ -197,6 +220,7 @@ export default function ChatPage() {
                         const category = review.category || 'GENERAL';
                         const isComplex = review.is_complex ? 'HIGH' : 'LOW';
                         const reason = review.reason || 'Task Evaluated';
+
 
                         // 2. 拼接成极具压迫感的赛博朋克风日志
                         const traceLog = `[Auto-Selection Trace]: Category: [ ${category.toUpperCase()} ] | Complexity: [ ${isComplex} ] | Analysis: ${reason} | Deployed Core: [ ${model.toUpperCase()} ]`;
@@ -354,9 +378,30 @@ export default function ChatPage() {
 
     return (
         <div className="relative min-h-screen font-vn overflow-hidden flex">
+            {/* --- 核心修改：动态应用模糊与滤镜特效 --- */}
             <div className="absolute inset-0 z-0 bg-slate-900">
-                {bgUrl && <img src={bgUrl} alt="Background" className="w-full h-full object-cover opacity-60 filter brightness-75 contrast-125 transition-opacity duration-1000 animate-fade-in" onError={(e) => { e.target.style.display = 'none'; }} />}
-                <div className="absolute inset-0 bg-gradient-to-b from-slate-900/60 via-slate-900/40 to-slate-900/90 backdrop-blur-[1px]" />
+                {bgUrl && (
+                    <img
+                        src={bgUrl}
+                        alt="Background"
+                        // 如果开启特效，就应用 opacity-60 和降低亮度的滤镜；如果关闭，就显示清晰原图 (opacity-80 稍微防刺眼)
+                        className={`w-full h-full object-cover transition-all duration-1000 animate-fade-in ${
+                            isBlurEnabled ? 'opacity-60 filter brightness-75 contrast-125' : 'opacity-80 filter-none'
+                        }`}
+                        onError={(e) => {
+                            e.target.style.display = 'none';
+                        }}
+                    />
+                )}
+                {/* 如果开启特效，才渲染这层厚重的渐变毛玻璃 */}
+                {isBlurEnabled && (
+                    <div
+                        className="absolute inset-0 bg-gradient-to-b from-slate-900/60 via-slate-900/40 to-slate-900/90 backdrop-blur-[1px]"/>
+                )}
+                {/* 即使关闭特效，也加一层极浅的黑色蒙版，保证白色的聊天文字能看清 */}
+                {!isBlurEnabled && (
+                    <div className="absolute inset-0 bg-black/30"/>
+                )}
             </div>
 
             <SessionSidebar isSidebarOpen={isSidebarOpen}
@@ -368,10 +413,12 @@ export default function ChatPage() {
 
             <div className="relative z-10 flex flex-col flex-1 h-screen">
                 <div className="flex justify-between items-center p-6 w-full">
-                    <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="text-white/40 hover:text-white transition-colors p-2 hover:bg-white/10 rounded-lg cursor-pointer">
-                        <Menu size={24} />
+                    <button onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                            className="text-white/40 hover:text-white transition-colors p-2 hover:bg-white/10 rounded-lg cursor-pointer">
+                        <Menu size={24}/>
                     </button>
-                    <button onClick={() => navigateWithTransition('/')} className="text-white/40 hover:text-white vn-text-shadow text-sm transition-colors cursor-pointer font-sans tracking-widest">
+                    <button onClick={() => navigateWithTransition('/')}
+                            className="text-white/40 hover:text-white vn-text-shadow text-sm transition-colors cursor-pointer font-sans tracking-widest">
                         [ Return ]
                     </button>
                 </div>
@@ -384,13 +431,15 @@ export default function ChatPage() {
 
                                     {/* 1. 最顶层：渲染专属的 System Log (路由信息) */}
                                     {msg.systemLog && (
-                                        <div className="text-green-400/80 font-mono text-sm border-l-2 border-green-500/50 pl-3 mb-4 shadow-[0_0_10px_rgba(34,197,94,0.1)]">
+                                        <div
+                                            className="text-green-400/80 font-mono text-sm border-l-2 border-green-500/50 pl-3 mb-4 shadow-[0_0_10px_rgba(34,197,94,0.1)]">
                                             {msg.systemLog}
                                         </div>
                                     )}
 
                                     {/* 2. 第二层：优雅地使用抽离出来的 AgentTracePanel 组件 (思考与工具) */}
-                                    {msg.sender === 'ai' && <AgentTracePanel steps={msg.steps} tokenUsage={msg.tokenUsage} />}
+                                    {msg.sender === 'ai' &&
+                                        <AgentTracePanel steps={msg.steps} tokenUsage={msg.tokenUsage}/>}
 
                                     {/* 3. 最底层：渲染普通的文本主体 */}
                                     <p className={`text-lg md:text-xl leading-snug tracking-tight vn-text-shadow break-words whitespace-pre-wrap ${
@@ -404,22 +453,32 @@ export default function ChatPage() {
                         </div>
                     </div>
 
-                    <div className={`mt-4 pt-4 border-t transition-colors duration-500 w-full ${agentQuestion ? 'border-yellow-400/50' : inputBorder}`}>
+                    <div
+                        className={`mt-4 pt-4 border-t transition-colors duration-500 w-full ${agentQuestion ? 'border-yellow-400/50' : inputBorder}`}>
                         <div className="flex justify-between items-end mb-2 min-h-[24px]">
-                            <div>{agentQuestion && <div className="text-sm text-yellow-300 font-serif tracking-wide animate-pulse">[System]: Waiting for confirmation: "{agentQuestion}"</div>}</div>
-                            <button onClick={() => setChatModeIndex((prev) => (prev + 1) % MODES.length)} disabled={isSending || agentQuestion} className={`text-xs font-sans tracking-widest px-3 py-1 rounded transition-all duration-300 border ${modeStyle} ${isSending || agentQuestion ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+                            <div>{agentQuestion && <div
+                                className="text-sm text-yellow-300 font-serif tracking-wide animate-pulse">[System]:
+                                Waiting for confirmation: "{agentQuestion}"</div>}</div>
+                            <button onClick={() => setChatModeIndex((prev) => (prev + 1) % MODES.length)}
+                                    disabled={isSending || agentQuestion}
+                                    className={`text-xs font-sans tracking-widest px-3 py-1 rounded transition-all duration-300 border ${modeStyle} ${isSending || agentQuestion ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
                                 {modeLabel}
                             </button>
                         </div>
                         <div className="flex items-center w-full">
-                            <span className={`text-lg md:text-xl vn-text-shadow mr-2 font-bold transition-colors ${agentQuestion ? 'text-yellow-400' : inputArrow}`}>&gt;</span>
-                            <input type="text" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleSend} autoFocus disabled={isSending || !chatId} placeholder={isSending ? "Processing..." : (agentQuestion ? "Type your answer here..." : "Message...")} className={`flex-1 w-full bg-transparent border-none outline-none text-lg md:text-xl text-white vn-text-shadow placeholder-white/20 font-vn leading-snug tracking-tight caret-transparent cursor-blink ${isSending ? 'opacity-50' : ''}`} autoComplete="off" />
+                            <span
+                                className={`text-lg md:text-xl vn-text-shadow mr-2 font-bold transition-colors ${agentQuestion ? 'text-yellow-400' : inputArrow}`}>&gt;</span>
+                            <input type="text" value={input} onChange={(e) => setInput(e.target.value)}
+                                   onKeyDown={handleSend} autoFocus disabled={isSending || !chatId}
+                                   placeholder={isSending ? "Processing..." : (agentQuestion ? "Type your answer here..." : "Message...")}
+                                   className={`flex-1 w-full bg-transparent border-none outline-none text-lg md:text-xl text-white vn-text-shadow placeholder-white/20 font-vn leading-snug tracking-tight caret-transparent cursor-blink ${isSending ? 'opacity-50' : ''}`}
+                                   autoComplete="off"/>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <ImageModal imageUrl={modalImage} onClose={() => setModalImage(null)} />
+            <ImageModal imageUrl={modalImage} onClose={() => setModalImage(null)}/>
         </div>
     );
 }
