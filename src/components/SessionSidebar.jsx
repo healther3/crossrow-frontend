@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, MessageSquare, Trash2, Edit2, Check, X } from 'lucide-react';
 
-export default function SessionSidebar({ isSidebarOpen, currentChatId, onSessionSelect, onNewSession, token }) {
-    const [sessions, setSessions] = useState([]);
+export default function SessionSidebar({ isSidebarOpen, currentChatId, onSessionSelect, onNewSession, token, dynamicTitleUpdate }) {    const [sessions, setSessions] = useState([]);
 
     // 重命名相关的状态
     const [editingId, setEditingId] = useState(null);
@@ -10,6 +9,43 @@ export default function SessionSidebar({ isSidebarOpen, currentChatId, onSession
 
     // --- 新增：自定义删除确认框的状态 ---
     const [sessionToDelete, setSessionToDelete] = useState(null);
+    // --- 新增：动态标题打字机状态 ---
+    // typingTitle 结构: { id: "...", targetText: "...", currentText: "..." }
+    const [typingTitle, setTypingTitle] = useState(null);
+
+    // 监听父组件传来的动态标题更新信号
+    useEffect(() => {
+        if (dynamicTitleUpdate && dynamicTitleUpdate.id && dynamicTitleUpdate.title) {
+            setTypingTitle({
+                id: dynamicTitleUpdate.id,
+                targetText: dynamicTitleUpdate.title,
+                currentText: ""
+            });
+        }
+    }, [dynamicTitleUpdate]);
+
+    // 打字机递归渲染引擎
+    useEffect(() => {
+        if (!typingTitle) return;
+
+        const { id, targetText, currentText } = typingTitle;
+
+        if (currentText.length < targetText.length) {
+            // 还没打完，设置定时器打下一个字
+            const timer = setTimeout(() => {
+                setTypingTitle(prev => ({
+                    ...prev,
+                    currentText: targetText.slice(0, prev.currentText.length + 1)
+                }));
+            }, 50); // 打字速度：50毫秒/字
+            return () => clearTimeout(timer);
+        } else {
+            // 打完了，更新真实的 session 列表，并延迟一小会儿清空打字机状态（让光标多闪一下）
+            setSessions(prev => prev.map(s => s.id === id ? { ...s, title: targetText } : s));
+            const timer = setTimeout(() => setTypingTitle(null), 800);
+            return () => clearTimeout(timer);
+        }
+    }, [typingTitle]);
 
     const baseUrlAPI = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8123';
     const sessionApiUrl = `${baseUrlAPI}/api/sessions`;
@@ -167,17 +203,27 @@ export default function SessionSidebar({ isSidebarOpen, currentChatId, onSession
                                     </div>
                                 ) : (
                                     <>
-                                        <span className="font-sans text-sm tracking-wide truncate flex-1">
-                                            {session.title || 'New Conversation'}
-                                        </span>
+                                        <div className="font-sans text-sm tracking-wide truncate flex-1">
+                                            {typingTitle && typingTitle.id === session.id ? (
+                                                // 正在打字的会话，显示打字过程和闪烁的光标
+                                                <span className="text-cyan-400">
+                                                {typingTitle.currentText}
+                                                    <span className="animate-pulse">█</span>
+                                            </span>
+                                            ) : (
+                                                // 正常的会话显示
+                                                <span>{session.title || 'New Conversation'}</span>
+                                            )}
+                                        </div>
 
-                                        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-2 transition-opacity duration-200">
+                                        <div
+                                            className="opacity-0 group-hover:opacity-100 flex items-center gap-2 transition-opacity duration-200">
                                             <button
                                                 onClick={(e) => startEditing(e, session)}
                                                 className="text-slate-400 hover:text-blue-400 transition-colors p-1"
                                                 title="Rename"
                                             >
-                                                <Edit2 size={14} />
+                                                <Edit2 size={14}/>
                                             </button>
                                             <button
                                                 // 换成新的 requestDelete，而不是直接调后端的 deleteSession

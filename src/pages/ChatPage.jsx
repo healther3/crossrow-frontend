@@ -19,6 +19,7 @@ export default function ChatPage() {
     const [isSending, setIsSending] = useState(false);
     const [modalImage, setModalImage] = useState(null);
     const [agentQuestion, setAgentQuestion] = useState(null);
+    const [dynamicTitleUpdate, setDynamicTitleUpdate] = useState(null);
 
     const [chatModeIndex, setChatModeIndex] = useState(0);
     const chatMode = MODES[chatModeIndex];
@@ -306,6 +307,22 @@ export default function ChatPage() {
                     } catch (e) {}
                     eventSource.close(); setIsSending(false); eventSourceRef.current = null;
                 });
+                // 【新增】：监听后端异步生成的标题事件
+                eventSource.addEventListener("session_title", (event) => {
+                    try {
+                        // 假设后端传过来的是: {"title": "人工智能的哲学意义"}
+                        const titleData = JSON.parse(event.data);
+                        if (titleData && titleData.title) {
+                            // 触发侧边栏的打字机动画
+                            setDynamicTitleUpdate({
+                                id: chatId,
+                                title: titleData.title
+                            });
+                        }
+                    } catch (e) {
+                        console.error("Failed to parse dynamic title", e);
+                    }
+                });
 
             } catch (err) { setIsSending(false); }
         }
@@ -327,7 +344,12 @@ export default function ChatPage() {
                 <div className="absolute inset-0 bg-gradient-to-b from-slate-900/60 via-slate-900/40 to-slate-900/90 backdrop-blur-[1px]" />
             </div>
 
-            <SessionSidebar isSidebarOpen={isSidebarOpen} currentChatId={chatId} onSessionSelect={handleSessionSelect} onNewSession={handleNewSession} token={token} />
+            <SessionSidebar isSidebarOpen={isSidebarOpen}
+                            currentChatId={chatId}
+                            onSessionSelect={handleSessionSelect}
+                            onNewSession={handleNewSession}
+                            token={token}
+                            dynamicTitleUpdate={dynamicTitleUpdate}/>
 
             <div className="relative z-10 flex flex-col flex-1 h-screen">
                 <div className="flex justify-between items-center p-6 w-full">
