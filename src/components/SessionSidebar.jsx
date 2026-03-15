@@ -1,279 +1,324 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, MessageSquare, Trash2, Edit2, Check, X } from 'lucide-react';
+import { MessageSquare, Plus, Trash2, Folder, FolderOpen, Edit2 } from 'lucide-react';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 
-export default function SessionSidebar({ isSidebarOpen, currentChatId, onSessionSelect, onNewSession, token, dynamicTitleUpdate }) {    const [sessions, setSessions] = useState([]);
+export default function SessionSidebar({
+                                           isSidebarOpen,
+                                           currentChatId,
+                                           onSessionSelect,
+                                           onNewSession,
+                                           token,
+                                           dynamicTitleUpdate
+                                       }) {
+    const baseUrlAPI = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8123';
 
-    // 重命名相关的状态
-    const [editingId, setEditingId] = useState(null);
-    const [editTitle, setEditTitle] = useState('');
+    const [folders, setFolders] = useState([]);
+    const [expandedFolders, setExpandedFolders] = useState(new Set());
 
-    // --- 新增：自定义删除确认框的状态 ---
     const [sessionToDelete, setSessionToDelete] = useState(null);
-    // --- 新增：动态标题打字机状态 ---
-    // typingTitle 结构: { id: "...", targetText: "...", currentText: "..." }
+    const [folderToDelete, setFolderToDelete] = useState(null);
     const [typingTitle, setTypingTitle] = useState(null);
 
-    // 监听父组件传来的动态标题更新信号
+    // 1. 初始化加载
+    const loadFolders = async () => {
+        if (!token) return;
+        try {
+            const response = await fetch(`${baseUrlAPI}/api/folders`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (response.ok) {
+                const data = await response.json();
+                setFolders(prevFolders => {
+                    const prevIds = new Set(prevFolders.map(f => f.id));
+                    setExpandedFolders(prevExpanded => {
+                        const nextExpanded = new Set(prevExpanded);
+                        if (prevIds.size === 0) {
+                            data.forEach(f => nextExpanded.add(f.id));
+                        } else {
+                            data.forEach(f => {
+                                if (!prevIds.has(f.id)) nextExpanded.add(f.id);
+                            });
+                        }
+                        return nextExpanded;
+                    });
+                    return data;
+                });
+            }
+        } catch (error) {
+            console.error("Failed to load folders:", error);
+        }
+    };
+
+    useEffect(() => { loadFolders(); }, [token]);
+
+    // 2. 动态标题打字机
     useEffect(() => {
         if (dynamicTitleUpdate && dynamicTitleUpdate.id && dynamicTitleUpdate.title) {
-            setTypingTitle({
-                id: dynamicTitleUpdate.id,
-                targetText: dynamicTitleUpdate.title,
-                currentText: ""
-            });
+            setTypingTitle({ id: dynamicTitleUpdate.id, targetText: dynamicTitleUpdate.title, currentText: "" });
         }
     }, [dynamicTitleUpdate]);
 
-    // 打字机递归渲染引擎
     useEffect(() => {
         if (!typingTitle) return;
-
         const { id, targetText, currentText } = typingTitle;
 
         if (currentText.length < targetText.length) {
-            // 还没打完，设置定时器打下一个字
             const timer = setTimeout(() => {
-                setTypingTitle(prev => ({
-                    ...prev,
-                    currentText: targetText.slice(0, prev.currentText.length + 1)
-                }));
-            }, 50); // 打字速度：50毫秒/字
+                setTypingTitle(prev => ({ ...prev, currentText: targetText.slice(0, prev.currentText.length + 1) }));
+            }, 50);
             return () => clearTimeout(timer);
         } else {
-            // 打完了，更新真实的 session 列表，并延迟一小会儿清空打字机状态（让光标多闪一下）
-            setSessions(prev => prev.map(s => s.id === id ? { ...s, title: targetText } : s));
+            setFolders(prevFolders => prevFolders.map(folder => ({
+                ...folder,
+                sessions: folder.sessions.map(s => s.id === id ? { ...s, title: targetText } : s)
+            })));
             const timer = setTimeout(() => setTypingTitle(null), 800);
             return () => clearTimeout(timer);
         }
     }, [typingTitle]);
 
-    const baseUrlAPI = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8123';
-    const sessionApiUrl = `${baseUrlAPI}/api/sessions`;
-
-    // 1. 获取会话列表
-    const fetchSessions = async () => {
-        if (!token) return;
+    // 3. 文件夹操作
+    const handleCreateFolder = async () => {
+        const name = "NEW FOLDER";
         try {
-            const response = await fetch(sessionApiUrl, {
+            const res = await fetch(`${baseUrlAPI}/api/folders?name=${encodeURIComponent(name)}`, {
+                method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
-            if (response.ok) {
-                const data = await response.json();
-                setSessions(data);
-                if (!currentChatId && data.length > 0) {
-                    onSessionSelect(data[0].id);
-                } else if (!currentChatId && data.length === 0) {
-                    createNewSession();
-                }
-            }
-        } catch (error) {
-            console.error("Failed to fetch sessions:", error);
-        }
+            if (res.ok) loadFolders();
+        } catch (e) { console.error(e); }
     };
 
-    // 2. 创建新会话
-    const createNewSession = async () => {
+    const handleRenameFolder = async (folderId, currentName) => {
+        const name = window.prompt("Rename folder:", currentName);
+        if (!name || !name.trim() || name === currentName) return;
         try {
-            const response = await fetch(sessionApiUrl, {
+            const res = await fetch(`${baseUrlAPI}/api/folders/${folderId}/name?name=${encodeURIComponent(name.trim())}`, {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) loadFolders();
+        } catch (e) { console.error(e); }
+    };
+
+    const handleDeleteFolder = async (folderId) => {
+        try {
+            const res = await fetch(`${baseUrlAPI}/api/folders/${folderId}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                setFolderToDelete(null);
+                loadFolders();
+            }
+        } catch (e) { console.error(e); }
+    };
+
+    // 4. 会话操作
+    const handleCreateSession = async (folderId = null) => {
+        try {
+            const url = folderId
+                ? `${baseUrlAPI}/api/sessions?title=New Conversation&folderId=${folderId}`
+                : `${baseUrlAPI}/api/sessions?title=New Conversation`;
+
+            const response = await fetch(url, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (response.ok) {
-                const newSession = await response.json();
-                setSessions(prev => [newSession, ...prev]);
-                onNewSession(newSession.id);
+                const newSessionId = await response.text();
+                loadFolders();
+                onNewSession(newSessionId);
             }
-        } catch (error) {
-            console.error("Failed to create session:", error);
-        }
+        } catch (error) { console.error(error); }
     };
 
-    // 3A. 触发删除意图（只弹窗，不发请求）
-    const requestDelete = (e, id) => {
-        e.stopPropagation();
-        setSessionToDelete(id); // 记录要删除的ID，触发弹窗显示
-    };
-
-    // 3B. 正式执行删除（用户在弹窗中点了确认）
-    const confirmDelete = async () => {
-        if (!sessionToDelete) return;
-        const id = sessionToDelete;
-
+    const handleDeleteSession = async (sessionId) => {
         try {
-            const response = await fetch(`${sessionApiUrl}/${id}`, {
+            const response = await fetch(`${baseUrlAPI}/api/sessions/${sessionId}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (response.ok) {
-                const updatedSessions = sessions.filter(s => s.id !== id);
-                setSessions(updatedSessions);
-
-                if (id === currentChatId) {
-                    if (updatedSessions.length > 0) {
-                        onSessionSelect(updatedSessions[0].id);
-                    } else {
-                        createNewSession();
-                    }
-                }
+                setSessionToDelete(null);
+                loadFolders();
+                if (currentChatId === sessionId) onNewSession(null);
             }
-        } catch (error) {
-            console.error("Failed to delete session:", error);
-        } finally {
-            // 无论成功失败，最后都要关闭弹窗
-            setSessionToDelete(null);
-        }
+        } catch (error) { console.error(error); }
     };
 
-    // 4. 开始编辑标题
-    const startEditing = (e, session) => {
-        e.stopPropagation();
-        setEditingId(session.id);
-        setEditTitle(session.title || 'New Conversation');
+    const toggleFolder = (folderId) => {
+        setExpandedFolders(prev => {
+            const next = new Set(prev);
+            if (next.has(folderId)) next.delete(folderId);
+            else next.add(folderId);
+            return next;
+        });
     };
 
-    // 5. 保存编辑的标题
-    const saveTitle = async (e, id) => {
-        e.stopPropagation();
-        if (!editTitle.trim()) {
-            setEditingId(null);
-            return;
-        }
+    // 拖拽逻辑
+    const onDragEnd = async (result) => {
+        const { source, destination, draggableId } = result;
+        if (!destination) return;
+        if (source.droppableId === destination.droppableId && source.index === destination.index) return;
+
+        const sourceFolderId = source.droppableId;
+        const destFolderId = destination.droppableId;
+
+        setFolders(prevFolders => {
+            const newFolders = JSON.parse(JSON.stringify(prevFolders));
+            const sourceFolder = newFolders.find(f => f.id === sourceFolderId);
+            const destFolder = newFolders.find(f => f.id === destFolderId);
+            const [movedSession] = sourceFolder.sessions.splice(source.index, 1);
+            destFolder.sessions.splice(destination.index, 0, movedSession);
+            return newFolders;
+        });
 
         try {
-            const response = await fetch(`${sessionApiUrl}/${id}/title?title=${encodeURIComponent(editTitle)}`, {
+            const res = await fetch(`${baseUrlAPI}/api/folders/sessions/${draggableId}/move?folderId=${destFolderId}`, {
                 method: 'PUT',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
-            if (response.ok) {
-                setSessions(sessions.map(s => s.id === id ? { ...s, title: editTitle } : s));
-                setEditingId(null);
+            if (!res.ok) {
+                console.error("Failed to move session in backend");
+                loadFolders();
             }
         } catch (error) {
-            console.error("Failed to update title:", error);
+            console.error("Network error during drag and drop", error);
+            loadFolders();
         }
     };
 
-    useEffect(() => {
-        fetchSessions();
-    }, [token]);
-
     return (
-        <>
-            <div className={`relative z-40 flex-shrink-0 bg-slate-900/80 backdrop-blur-xl border-r border-white/10 transition-all duration-300 ease-in-out ${
-                isSidebarOpen ? 'w-72 translate-x-0' : 'w-0 -translate-x-full overflow-hidden'
-            }`}>
-                <div className="flex flex-col h-full p-4 w-72">
+        // 【核心修复】：h-full 改为了 h-screen shrink-0。强行将侧边栏锁定为屏幕高度！
+        <div className={`flex flex-col h-screen shrink-0 bg-slate-950/80 backdrop-blur-2xl border-r border-slate-800/50 transition-all duration-500 z-50 overflow-hidden shadow-2xl ${
+            isSidebarOpen ? 'w-72 opacity-100 translate-x-0' : 'w-0 opacity-0 -translate-x-full border-none'
+        }`}>
+            {/* 侧边栏头部 */}
+            <div className="p-5 border-b border-slate-800/50 flex flex-col gap-4">
+                <div className="flex justify-between items-center">
+                    <span className="text-slate-200 font-serif text-xl tracking-widest uppercase vn-text-shadow select-none">
+                        Archives
+                    </span>
                     <button
-                        onClick={createNewSession}
-                        className="flex items-center justify-center gap-2 w-full py-3 mb-6 border border-white/20 rounded-xl text-white/80 hover:text-blue-400 hover:bg-blue-500/10 hover:border-blue-400/50 transition-all duration-300 font-sans tracking-widest text-sm cursor-pointer shadow-lg"
+                        onClick={handleCreateFolder}
+                        className="text-slate-400 hover:text-cyan-400 transition-colors cursor-pointer p-1"
+                        title="New Folder"
                     >
-                        <Plus size={18} /> NEW CHAT
+                        <Folder size={18} />
                     </button>
-
-                    <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-2">
-                        {sessions.map(session => (
-                            <div
-                                key={session.id}
-                                onClick={() => onSessionSelect(session.id)}
-                                className={`group flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-300 ${
-                                    currentChatId === session.id
-                                        ? 'bg-blue-500/20 border border-blue-500/30 text-blue-100 shadow-[0_0_15px_rgba(59,130,246,0.15)]'
-                                        : 'text-slate-400 hover:bg-white/5 border border-transparent hover:text-slate-200'
-                                }`}
-                            >
-                                <MessageSquare size={16} className={`flex-shrink-0 ${currentChatId === session.id ? "text-blue-400" : "text-slate-500"}`} />
-
-                                {editingId === session.id ? (
-                                    <div className="flex-1 flex items-center gap-2 overflow-hidden">
-                                        <input
-                                            type="text"
-                                            value={editTitle}
-                                            onChange={(e) => setEditTitle(e.target.value)}
-                                            onClick={(e) => e.stopPropagation()}
-                                            onKeyDown={(e) => e.key === 'Enter' && saveTitle(e, session.id)}
-                                            autoFocus
-                                            className="flex-1 bg-black/30 border border-blue-500/50 rounded px-2 py-1 text-sm text-white outline-none w-full"
-                                        />
-                                        <button onClick={(e) => saveTitle(e, session.id)} className="text-green-400 hover:text-green-300 flex-shrink-0">
-                                            <Check size={16} />
-                                        </button>
-                                        <button onClick={(e) => { e.stopPropagation(); setEditingId(null); }} className="text-red-400 hover:text-red-300 flex-shrink-0">
-                                            <X size={16} />
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <>
-                                        <div className="font-sans text-sm tracking-wide truncate flex-1">
-                                            {typingTitle && typingTitle.id === session.id ? (
-                                                // 正在打字的会话，显示打字过程和闪烁的光标
-                                                <span className="text-cyan-400">
-                                                {typingTitle.currentText}
-                                                    <span className="animate-pulse">█</span>
-                                            </span>
-                                            ) : (
-                                                // 正常的会话显示
-                                                <span>{session.title || 'New Conversation'}</span>
-                                            )}
-                                        </div>
-
-                                        <div
-                                            className="opacity-0 group-hover:opacity-100 flex items-center gap-2 transition-opacity duration-200">
-                                            <button
-                                                onClick={(e) => startEditing(e, session)}
-                                                className="text-slate-400 hover:text-blue-400 transition-colors p-1"
-                                                title="Rename"
-                                            >
-                                                <Edit2 size={14}/>
-                                            </button>
-                                            <button
-                                                // 换成新的 requestDelete，而不是直接调后端的 deleteSession
-                                                onClick={(e) => requestDelete(e, session.id)}
-                                                className="text-slate-400 hover:text-red-400 transition-colors p-1"
-                                                title="Delete"
-                                            >
-                                                <Trash2 size={14} />
-                                            </button>
-                                        </div>
-                                    </>
-                                )}
-                            </div>
-                        ))}
-                    </div>
                 </div>
             </div>
 
-            {/* --- 新增：优雅的自定义删除确认弹窗 --- */}
-            {sessionToDelete && (
-                <div
-                    className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in"
-                    onClick={() => setSessionToDelete(null)} // 点击背景区域取消
-                >
-                    <div
-                        className="bg-slate-900 border border-white/10 rounded-2xl p-8 shadow-2xl max-w-sm w-full mx-4 transform transition-all"
-                        onClick={(e) => e.stopPropagation()} // 防止点击弹窗内部时触发背景的取消事件
-                    >
-                        <h3 className="text-2xl font-serif text-white mb-4 tracking-wide">Delete Memory?</h3>
-                        <p className="text-slate-400 text-sm mb-8 leading-relaxed">
-                            This action cannot be undone. This conversation will be permanently erased from the server.
-                        </p>
+            <DragDropContext onDragEnd={onDragEnd}>
+                {/* 滚动区域：因为父元素被锁死了 h-screen，这里的 flex-1 overflow-y-auto 终于可以完美生效了 */}
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-4">
+                    {folders.map(folder => {
+                        const isExpanded = expandedFolders.has(folder.id);
 
-                        <div className="flex justify-end gap-4">
-                            <button
-                                onClick={() => setSessionToDelete(null)}
-                                className="px-5 py-2 rounded-xl text-slate-300 hover:text-white hover:bg-white/10 transition-colors text-sm font-sans tracking-wide cursor-pointer"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={confirmDelete}
-                                className="px-5 py-2 rounded-xl bg-red-500/20 text-red-400 border border-red-500/30 hover:bg-red-500 hover:text-white transition-all text-sm font-sans tracking-wide shadow-[0_0_15px_rgba(239,68,68,0.2)] hover:shadow-[0_0_20px_rgba(239,68,68,0.6)] cursor-pointer"
-                            >
-                                Delete
-                            </button>
-                        </div>
-                    </div>
+                        return (
+                            <div key={folder.id} className="flex flex-col space-y-1">
+                                {/* 文件夹头部 */}
+                                <div className="group flex items-center justify-between px-2 py-1.5 rounded hover:bg-slate-800/40 text-slate-400 transition-colors">
+                                    <div
+                                        className="flex items-center gap-2 flex-1 cursor-pointer select-none overflow-hidden pr-2"
+                                        onClick={() => toggleFolder(folder.id)}
+                                    >
+                                        {isExpanded ? <FolderOpen size={16} className="text-cyan-600/80 shrink-0" /> : <Folder size={16} className="text-cyan-800/80 shrink-0" />}
+                                        <span className="font-sans text-xs font-bold tracking-wider uppercase truncate">
+                                            {folder.name}
+                                        </span>
+                                    </div>
+
+                                    {folderToDelete === folder.id ? (
+                                        <div className="flex items-center gap-2 shrink-0 bg-slate-900 px-2 py-1 rounded">
+                                            <span className="text-[10px] text-red-500/80 font-sans tracking-widest uppercase animate-pulse pr-1">Purge?</span>
+                                            <button onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder.id); }} className="text-red-400 hover:text-red-300 text-xs font-bold transition-colors cursor-pointer">[Y]</button>
+                                            <button onClick={(e) => { e.stopPropagation(); setFolderToDelete(null); }} className="text-slate-400 hover:text-slate-300 text-xs font-bold transition-colors cursor-pointer">[N]</button>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 bg-slate-800/80 px-1 rounded">
+                                            <button onClick={() => handleCreateSession(folder.id)} className="p-1 hover:text-cyan-400 transition-colors cursor-pointer" title="New Chat Here"><Plus size={14} /></button>
+                                            {!folder.isDefault && (
+                                                <>
+                                                    <button onClick={() => handleRenameFolder(folder.id, folder.name)} className="p-1 hover:text-blue-400 transition-colors cursor-pointer" title="Rename"><Edit2 size={12} /></button>
+                                                    <button onClick={(e) => { e.stopPropagation(); setFolderToDelete(folder.id); }} className="p-1 hover:text-red-400 transition-colors cursor-pointer" title="Delete"><Trash2 size={12} /></button>
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* 拖拽接收区 */}
+                                {isExpanded && (
+                                    <Droppable droppableId={folder.id}>
+                                        {(provided, snapshot) => (
+                                            <div
+                                                ref={provided.innerRef}
+                                                {...provided.droppableProps}
+                                                className={`flex flex-col space-y-1 pl-4 border-l ml-2 transition-colors duration-300 min-h-[20px] rounded-bl-md ${
+                                                    snapshot.isDraggingOver ? 'border-cyan-500/50 bg-cyan-950/20' : 'border-slate-800/30'
+                                                }`}
+                                            >
+                                                {folder.sessions && folder.sessions.length > 0 ? (
+                                                    folder.sessions.map((session, index) => (
+                                                        <Draggable key={session.id} draggableId={session.id} index={index}>
+                                                            {(provided, snapshot) => (
+                                                                <div
+                                                                    ref={provided.innerRef}
+                                                                    {...provided.draggableProps}
+                                                                    {...provided.dragHandleProps}
+                                                                    style={provided.draggableProps.style}
+                                                                    className={`group relative flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-grab active:cursor-grabbing transition-colors ${
+                                                                        snapshot.isDragging ? 'bg-cyan-900/60 shadow-[0_0_20px_rgba(6,182,212,0.3)] ring-1 ring-cyan-400/50 z-50' :
+                                                                            currentChatId === session.id
+                                                                                ? 'bg-blue-900/20 border border-blue-500/30 shadow-[0_0_10px_rgba(59,130,246,0.1)] text-blue-300'
+                                                                                : 'hover:bg-slate-800/50 text-slate-400 hover:text-slate-200 border border-transparent'
+                                                                    }`}
+                                                                >
+                                                                    <div className="flex-1 flex items-center gap-3 overflow-hidden" onClick={() => onSessionSelect(session.id)}>
+                                                                        <MessageSquare size={16} className={currentChatId === session.id ? 'text-blue-400' : 'text-slate-600 group-hover:text-slate-400 shrink-0'} />
+                                                                        <div className="font-sans text-sm tracking-wide truncate flex-1">
+                                                                            {typingTitle && typingTitle.id === session.id ? (
+                                                                                <span className="text-cyan-400">{typingTitle.currentText}<span className="animate-pulse">█</span></span>
+                                                                            ) : (
+                                                                                <span>{session.title || 'New Conversation'}</span>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {sessionToDelete === session.id ? (
+                                                                        <div className="flex items-center gap-2 shrink-0 bg-slate-900 px-1 py-0.5 rounded">
+                                                                            <button onClick={(e) => { e.stopPropagation(); handleDeleteSession(session.id); }} className="text-red-400 hover:text-red-300 text-xs font-bold transition-colors cursor-pointer">[Y]</button>
+                                                                            <button onClick={(e) => { e.stopPropagation(); setSessionToDelete(null); }} className="text-slate-400 hover:text-slate-300 text-xs font-bold transition-colors cursor-pointer">[N]</button>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <button
+                                                                            onClick={(e) => { e.stopPropagation(); setSessionToDelete(session.id); }}
+                                                                            className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-400 transition-all duration-200 shrink-0 p-1 cursor-pointer bg-slate-800/80 rounded"
+                                                                        >
+                                                                            <Trash2 size={14} />
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </Draggable>
+                                                    ))
+                                                ) : (
+                                                    <div className="py-2 pl-3 text-xs text-slate-600 font-sans italic select-none opacity-50">
+                                                        Drop to move here...
+                                                    </div>
+                                                )}
+                                                {provided.placeholder}
+                                            </div>
+                                        )}
+                                    </Droppable>
+                                )}
+                            </div>
+                        );
+                    })}
                 </div>
-            )}
-        </>
+            </DragDropContext>
+        </div>
     );
 }
