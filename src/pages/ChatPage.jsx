@@ -254,8 +254,20 @@ export default function ChatPage() {
                 eventSource.addEventListener("step", (event) => {
                     try {
                         const dto = JSON.parse(event.data);
-                        // 判断这是一个标准的 DTO 对象还是一串被包成 JSON 的普通字符串
                         if (dto && (dto.stepType || dto.stepNumber !== undefined)) {
+
+                            // ==========================================
+                            // 【核心修复】：拦截并解析工具调用结果中的隐藏标签！
+                            // ==========================================
+                            if (dto.toolCalls && Array.isArray(dto.toolCalls)) {
+                                dto.toolCalls.forEach(tool => {
+                                    if (tool.result && typeof tool.result === 'string') {
+                                        // 扫描工具的结果，触发图片弹窗，并把标签从文本中抹除
+                                        tool.result = processDataWithHiddenActions(tool.result);
+                                    }
+                                });
+                            }
+
                             setMessages(prev => prev.map(msg => {
                                 if (msg.id === aiMsgId) {
                                     const newMsg = { ...msg };
@@ -263,7 +275,16 @@ export default function ChatPage() {
                                         targetTextRef.current = processDataWithHiddenActions(dto.finalAnswer || "");
                                         if (dto.tokenUsage) newMsg.tokenUsage = dto.tokenUsage;
                                     } else {
-                                        newMsg.steps = [...(newMsg.steps || []), dto];
+                                        const existingSteps = newMsg.steps || [];
+                                        const stepIndex = existingSteps.findIndex(s => s.stepNumber === dto.stepNumber);
+
+                                        if (stepIndex !== -1) {
+                                            const updatedSteps = [...existingSteps];
+                                            updatedSteps[stepIndex] = dto;
+                                            newMsg.steps = updatedSteps;
+                                        } else {
+                                            newMsg.steps = [...existingSteps, dto];
+                                        }
                                     }
                                     return newMsg;
                                 }
@@ -273,7 +294,6 @@ export default function ChatPage() {
                             handleRawData(event.data);
                         }
                     } catch (parseError) {
-                        // 解析失败说明它不是 JSON，当成纯文本流处理
                         handleRawData(event.data);
                     }
                 });
