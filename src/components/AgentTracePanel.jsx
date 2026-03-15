@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronDown, ChevronRight, Wrench, Terminal, Loader2, CheckCircle, XCircle, ShieldAlert, ShieldCheck } from 'lucide-react';
 // 专门用来渲染单个 Tool Call 并管理伪加载进度的子组件
+// 专门用来渲染单个 Tool Call 并管理伪加载进度的子组件
 const ToolCallItem = ({ tool }) => {
     const [progress, setProgress] = useState(0);
     const isPending = tool.status === 'pending';
@@ -23,48 +24,55 @@ const ToolCallItem = ({ tool }) => {
 
     return (
         <div className={`p-3 rounded-lg border space-y-2 mt-2 group transition-all duration-300 ${
-            isPending ? 'bg-blue-950/40 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.1)]' :
+            isPending ? 'bg-blue-950/20 border-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.1)]' :
                 isError ? 'bg-red-950/20 border-red-500/50' :
-                    'bg-black/50 border-green-900/40'
+                    'bg-green-950/20 border-green-500/30' // 【修改点1】：颜色变浅，完全对齐 Review 的色值和透明度
         }`}>
-            {/* 头部状态栏 */}
+            {/* 1. 头部：只保留工具名称与执行进度 */}
             <div className="flex items-center justify-between">
                 <div className={`font-bold flex items-center gap-2 text-sm ${
-                    isPending ? 'text-blue-400' : isError ? 'text-red-400' : 'text-green-400'
+                    isPending ? 'text-blue-400' : 'text-slate-400'
                 }`}>
-                    {isPending ? <Loader2 size={14} className="animate-spin" /> :
-                        isError ? <XCircle size={14} /> :
-                            <CheckCircle size={14} />}
-                    {tool.toolName}
+                    {isPending ? <Loader2 size={16} className="animate-spin text-blue-400" /> : <Terminal size={14} className="text-slate-500" />}
+                    <span className="tracking-wider uppercase">
+                        {tool.toolName}
+                    </span>
                 </div>
 
                 <div className="text-xs flex items-center gap-3">
                     {isPending && <span className="text-blue-400 font-mono tracking-widest">{progress}%</span>}
-                    {!isPending && tool.elapsedMs && <span className="text-slate-500 font-mono">{tool.elapsedMs}ms</span>}
-
-                    <span className={`px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-bold ${
-                        isPending ? 'bg-blue-500/20 text-blue-300 animate-pulse' :
-                            isError ? 'bg-red-500/20 text-red-300' :
-                                'bg-green-500/20 text-green-300'
-                    }`}>
-                        {tool.status || 'finished'}
-                    </span>
+                    {/* 移除了原本右上角的 success 小标签 */}
                 </div>
             </div>
 
-            {/* 调用参数 */}
-            <div className="text-slate-500 text-xs break-all bg-black/40 p-2 rounded border border-white/5 font-mono">
-                <span className="text-purple-400/70 select-none">Args: </span>
-                <span className="text-slate-400">{tool.arguments}</span>
+            {/* 2. 调用参数 (对齐 Review 的 pl-6 缩进样式) */}
+            <div className={`text-xs font-mono pl-6 ${isPending ? 'text-blue-400/70' : 'text-slate-400'}`}>
+                <span className="opacity-60">Args: </span> {tool.arguments}
             </div>
 
-            {/* 结果展示 (仅在完成或报错时显示) */}
+            {/* 3. 结果展示 (加上左侧缩进，与上下文排版对齐) */}
             {!isPending && tool.result && (
-                <div className={`text-xs mt-2 p-2 rounded font-mono ${
-                    isError ? 'bg-red-950/40 text-red-400/90' : 'bg-green-950/20 text-green-400/80 line-clamp-3 group-hover:line-clamp-none cursor-pointer'
+                <div className={`text-xs mt-3 ml-6 p-3 rounded-md font-mono border ${
+                    isError ? 'bg-red-950/40 border-red-500/20 text-red-400/90' : 'bg-green-950/10 border-green-500/20 text-green-400/80 line-clamp-4 group-hover:line-clamp-none cursor-pointer'
                 }`}>
-                    <span className={isError ? 'text-red-500/70 select-none' : 'text-green-500/70 select-none'}>Result: </span>
                     {tool.result}
+                </div>
+            )}
+
+            {/* 4. 【修改点2】底部状态栏：结果渲染完后，在最下方显示大号的 SUCCESS / FAILED */}
+            {!isPending && (
+                <div className={`flex items-center justify-between mt-3 pt-3 border-t pl-2 ${
+                    isError ? 'border-red-500/20' : 'border-green-500/20'
+                }`}>
+                    <div className={`flex items-center gap-2 font-bold text-sm ${
+                        isError ? 'text-red-400' : 'text-green-400'
+                    }`}>
+                        {isError ? <XCircle size={16} /> : <CheckCircle size={16} />}
+                        <span className="tracking-wider">
+                            {isError ? '[SUPERVISOR]: APPROVED' : '[SUPERVISOR]: REJECTED(ERROR)'}
+                        </span>
+                    </div>
+                    {tool.elapsedMs && <span className="text-slate-500 text-xs font-mono">{tool.elapsedMs}ms</span>}
                 </div>
             )}
         </div>

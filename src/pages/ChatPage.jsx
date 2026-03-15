@@ -213,6 +213,7 @@ export default function ChatPage() {
 
             const reviewParams = `&enableReview=${isReviewEnabled}&maxReviewRetries=2`;
             try {
+                const actualId = chatId.id;
                 if (chatMode === 'EXPERT') {
                     const preRes = await fetch(`${baseUrlAPI}/api/crossrow/expert/preview?message=${encodeURIComponent(userText)}`, { headers: { 'Authorization': `Bearer ${token}` } });
                     if(preRes.ok) {
@@ -222,7 +223,7 @@ export default function ChatPage() {
                             msg.id === aiMsgId ? { ...msg, systemLog: `[System Log]: Routing query to specialist [ ${expertName.toUpperCase()} ]` } : msg
                         ));
                     }
-                    finalUrl = `${baseUrlAPI}/api/crossrow/expert/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&token=${token}${reviewParams}`;
+                    finalUrl = `${baseUrlAPI}/api/crossrow/expert/chat?message=${encodeURIComponent(userText)}&chatId=${actualId}&userId=${userId}&token=${token}${reviewParams}`;
                 } else if (chatMode === 'AUTO') {
                     const decisionRes = await fetch(`${baseUrlAPI}/api/crossrow/route/decision?message=${encodeURIComponent(userText)}`, { headers: { 'Authorization': `Bearer ${token}` } });
                     if(decisionRes.ok) {
@@ -243,11 +244,11 @@ export default function ChatPage() {
                             msg.id === aiMsgId ? { ...msg, systemLog: traceLog } : msg
                         ));
                     }
-                    finalUrl = `${baseUrlAPI}/api/crossrow/chat/auto-route/sse?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&token=${token}`;
+                    finalUrl = `${baseUrlAPI}/api/crossrow/chat/auto-route/sse?message=${encodeURIComponent(userText)}&chatId=${actualId}&userId=${userId}&token=${token}`;
                 } else if (chatMode === 'PREFERRED') {
-                    finalUrl = `${baseUrlAPI}/api/crossrow/chat/model/sse?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&model=${preferredModel}&token=${token}`;
+                    finalUrl = `${baseUrlAPI}/api/crossrow/chat/model/sse?message=${encodeURIComponent(userText)}&chatId=${actualId}&userId=${userId}&model=${preferredModel}&token=${token}`;
                 } else {
-                    finalUrl = `${baseUrlAPI}/api/crossrow/agent/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&token=${token}${reviewParams}`;                }
+                    finalUrl = `${baseUrlAPI}/api/crossrow/agent/chat?message=${encodeURIComponent(userText)}&chatId=${actualId}&userId=${userId}&token=${token}${reviewParams}`;                }
 
                 const eventSource = new EventSource(finalUrl);
                 eventSourceRef.current = eventSource;
@@ -394,7 +395,7 @@ export default function ChatPage() {
                         if (titleData && titleData.title) {
                             // 触发侧边栏的打字机动画
                             setDynamicTitleUpdate({
-                                id: chatId,
+                                id: chatId.id,
                                 title: titleData.title
                             });
                         }
@@ -455,7 +456,7 @@ export default function ChatPage() {
             </div>
 
             <SessionSidebar isSidebarOpen={isSidebarOpen}
-                            currentChatId={chatId}
+                            currentChatId={chatId ? chatId.id : null}
                             onSessionSelect={handleSessionSelect}
                             onNewSession={handleNewSession}
                             token={token}
@@ -585,8 +586,6 @@ export default function ChatPage() {
 
                         {/* 3. 第三行：真正的输入框主体 */}
                         <div className="flex items-center w-full">
-                            <span
-                                className={`text-lg md:text-xl vn-text-shadow mr-2 font-bold transition-colors ${agentQuestion ? 'text-yellow-400' : inputArrow}`}>&gt;</span>
                             <input
                                 type="text"
                                 value={input}
