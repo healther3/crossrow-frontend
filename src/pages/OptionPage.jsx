@@ -144,9 +144,7 @@ export default function OptionPage() {
     const handleSave = async () => {
         setIsSaving(true);
 
-        // 保存背景模式
         updateMode(tempMode);
-        // 保存视觉特效偏好到 localStorage
         localStorage.setItem('crossrow_bg_blur', enableBlur);
 
         if (tempModel && tempModel !== originalModel) {
@@ -165,10 +163,12 @@ export default function OptionPage() {
         }
 
         setIsSaving(false);
+
+        // 【核心修改】：把 '/' 改成 -1，实现原路返回
         if (navigateWithTransition) {
-            navigateWithTransition('/');
+            navigateWithTransition(-1);
         } else {
-            navigate('/');
+            navigate(-1);
         }
     };
 
@@ -275,7 +275,15 @@ export default function OptionPage() {
                     {/* ==================================== */}
                     <div className="flex justify-center gap-8 mt-8 pt-6 border-t border-slate-100">
                         <OptionButton label={isSaving ? "Saving..." : "Confirm"} isSelected={false} size="text-lg md:text-xl" onClick={handleSave} />
-                        <OptionButton label="Cancel" isSelected={false} size="text-lg md:text-xl" onClick={() => navigate('/')} />
+
+                        {/* 【核心修改】：把 onClick={() => navigate('/')} 改成 navigate(-1) */}
+                        <OptionButton label="Cancel" isSelected={false} size="text-lg md:text-xl" onClick={() => {
+                            if (navigateWithTransition) {
+                                navigateWithTransition(-1);
+                            } else {
+                                navigate(-1);
+                            }
+                        }} />
                     </div>
 
                 </div>

@@ -417,10 +417,23 @@ export default function ChatPage() {
                             className="text-white/40 hover:text-white transition-colors p-2 hover:bg-white/10 rounded-lg cursor-pointer">
                         <Menu size={24}/>
                     </button>
-                    <button onClick={() => navigateWithTransition('/')}
-                            className="text-white/40 hover:text-white vn-text-shadow text-sm transition-colors cursor-pointer font-sans tracking-widest">
-                        [ Return ]
-                    </button>
+
+                    {/* --- 新增：右上角导航按钮组 --- */}
+                    <div className="flex items-center gap-6">
+                        <button
+                            // 注意：这里的 '/options' 请确保和你路由文件中配置页面的路径一致，如果是 '/config' 请自行修改
+                            onClick={() => navigateWithTransition('/options')}
+                            className="text-white/40 hover:text-white vn-text-shadow text-sm transition-colors cursor-pointer font-sans tracking-widest uppercase"
+                        >
+                            [ CONFIG ]
+                        </button>
+                        <button
+                            onClick={() => navigateWithTransition('/')}
+                            className="text-white/40 hover:text-white vn-text-shadow text-sm transition-colors cursor-pointer font-sans tracking-widest uppercase"
+                        >
+                            [ RETURN ]
+                        </button>
+                    </div>
                 </div>
 
                 <div className="flex-1 overflow-hidden flex flex-col w-full max-w-5xl mx-auto px-8 md:px-16 pb-12">
