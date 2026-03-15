@@ -111,14 +111,30 @@ export default function ChatPage() {
     };
 
     // 背景逻辑
+    // ==========================================
+    // 背景逻辑 (修复双重请求)
+    // ==========================================
+    // 1. 新增一个 Ref，用来记录上一次成功发起的请求特征
+    const lastBgRequestRef = useRef('');
+
     useEffect(() => {
+        if (!token || !userId) return;
+
+        // 2. 生成当前请求的“唯一指纹” (模式 + 坐标)
+        const currentConfigKey = `${bgConfig?.mode}-${bgConfig?.coords?.lat || ''}-${bgConfig?.coords?.lng || ''}`;
+
+        // 3. 终极拦截：如果当前指纹和上次一样，说明是 React 的多余渲染，直接拦截！
+        if (lastBgRequestRef.current === currentConfigKey) {
+            return;
+        }
+
+        // 记录这次的指纹
+        lastBgRequestRef.current = currentConfigKey;
+
         const fetchBackgroundUrl = async () => {
             try {
-                // 1. 【微调】：将没有任何配置时的兜底模式从 'RANDOM' 改为 'DEFAULT'
                 let mode = bgConfig?.mode || 'DEFAULT';
-
                 if (mode === 'USER' && (!bgConfig?.coords || !bgConfig.coords.lat)) mode = 'RANDOM';
-
                 if (mode === 'CUSTOM') {
                     const response = await fetch(`${baseUrlAPI}/api/user/background`, { headers: { 'Authorization': `Bearer ${token}` } });
                     if (response.ok) setBgUrl(await response.text());
@@ -129,7 +145,6 @@ export default function ChatPage() {
                 const params = new URLSearchParams();
                 params.append("userId", userId);
                 params.append("mode", mode);
-
                 if (mode === 'USER' && bgConfig?.coords) {
                     params.append("lat", bgConfig.coords.lat);
                     params.append("lng", bgConfig.coords.lng);
@@ -139,19 +154,17 @@ export default function ChatPage() {
                 if (response.ok) {
                     const urlString = await response.text();
                     if (urlString) {
-                        // 2. 【微调】：极其强壮的路径解析逻辑
                         if (urlString.startsWith('http')) {
-                            // 如果后端直接返回了完整的 http 绝对路径
                             setBgUrl(urlString);
                         } else if (urlString.startsWith('/')) {
-                            // 如果后端返回的是 "/images/default_BG.jpg" 这种相对路径
-                            // 前端会自动把它和 http://localhost:8123 拼起来
                             setBgUrl(`${baseUrlAPI}${urlString}`);
                         }
                     }
                 }
             } catch (error) {
                 console.error("Failed to fetch background:", error);
+                // 如果请求失败了，清空锁，允许下次重试
+                lastBgRequestRef.current = '';
             }
         };
         fetchBackgroundUrl();
