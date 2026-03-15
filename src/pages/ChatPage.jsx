@@ -179,16 +179,31 @@ export default function ChatPage() {
                     const preRes = await fetch(`${baseUrlAPI}/api/crossrow/expert/preview?message=${encodeURIComponent(userText)}`, { headers: { 'Authorization': `Bearer ${token}` } });
                     if(preRes.ok) {
                         const expertName = await preRes.text();
-                        setMessages(prev => [...prev, { id: Date.now() + 2, text: `[System Log]: Routing query to specialist [ ${expertName.toUpperCase()} ]`, sender: "system" }]);
+                        // 【核心修改】：不增加新气泡，而是给当前的 AI 气泡加上 systemLog 属性
+                        setMessages(prev => prev.map(msg =>
+                            msg.id === aiMsgId ? { ...msg, systemLog: `[System Log]: Routing query to specialist [ ${expertName.toUpperCase()} ]` } : msg
+                        ));
                     }
                     finalUrl = `${baseUrlAPI}/api/crossrow/expert/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&token=${token}`;
+
                 } else if (chatMode === 'AUTO') {
                     const decisionRes = await fetch(`${baseUrlAPI}/api/crossrow/route/decision?message=${encodeURIComponent(userText)}`, { headers: { 'Authorization': `Bearer ${token}` } });
                     if(decisionRes.ok) {
                         const decision = await decisionRes.json();
-                        const model = decision.selectedModel || decision.model || 'Optimal Framework';
-                        const reason = decision.taskReview?.reason || decision.reason || 'Complexity Evaluated';
-                        setMessages(prev => [...prev, { id: Date.now() + 2, text: `[Auto-Selection Trace]:\n- Analysis: ${reason}\n- Deployed Core: [ ${model} ]`, sender: "system" }]);
+
+                        // 1. 精准解析你的 Java Record 字段
+                        const model = decision.selectedModel || 'Optimal Framework';
+                        const review = decision.review || {};
+                        const category = review.category || 'GENERAL';
+                        const isComplex = review.is_complex ? 'HIGH' : 'LOW';
+                        const reason = review.reason || 'Task Evaluated';
+
+                        // 2. 拼接成极具压迫感的赛博朋克风日志
+                        const traceLog = `[Auto-Selection Trace]: Category: [ ${category.toUpperCase()} ] | Complexity: [ ${isComplex} ] | Analysis: ${reason} | Deployed Core: [ ${model.toUpperCase()} ]`;
+
+                        setMessages(prev => prev.map(msg =>
+                            msg.id === aiMsgId ? { ...msg, systemLog: traceLog } : msg
+                        ));
                     }
                     finalUrl = `${baseUrlAPI}/api/crossrow/chat/auto-route/sse?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&token=${token}`;
                 } else if (chatMode === 'PREFERRED') {
@@ -366,12 +381,20 @@ export default function ChatPage() {
                         <div className="flex flex-col space-y-6">
                             {messages.map((msg) => (
                                 <div key={msg.id} className="animate-fade-in w-full text-left">
+
+                                    {/* 1. 最顶层：渲染专属的 System Log (路由信息) */}
+                                    {msg.systemLog && (
+                                        <div className="text-green-400/80 font-mono text-sm border-l-2 border-green-500/50 pl-3 mb-4 shadow-[0_0_10px_rgba(34,197,94,0.1)]">
+                                            {msg.systemLog}
+                                        </div>
+                                    )}
+
+                                    {/* 2. 第二层：优雅地使用抽离出来的 AgentTracePanel 组件 (思考与工具) */}
                                     {msg.sender === 'ai' && <AgentTracePanel steps={msg.steps} tokenUsage={msg.tokenUsage} />}
 
+                                    {/* 3. 最底层：渲染普通的文本主体 */}
                                     <p className={`text-lg md:text-xl leading-snug tracking-tight vn-text-shadow break-words whitespace-pre-wrap ${
-                                        msg.sender === 'user' ? 'text-cyan-200' :
-                                            msg.sender === 'system' ? 'text-green-400/80 font-mono text-sm border-l-2 border-green-500/50 pl-3 my-2 shadow-[0_0_10px_rgba(34,197,94,0.1)]' :
-                                                'text-white'
+                                        msg.sender === 'user' ? 'text-cyan-200' : 'text-white'
                                     }`}>
                                         {msg.text}
                                     </p>
