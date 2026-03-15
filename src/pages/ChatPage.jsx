@@ -32,7 +32,7 @@ export default function ChatPage() {
     const { userId, token } = useAuth();
 
     const [isBlurEnabled] = useState(() => localStorage.getItem('crossrow_bg_blur') !== 'false');
-
+    const [isReviewEnabled, setIsReviewEnabled] = useState(() => localStorage.getItem('crossrow_enable_review') === 'true');
     const [messages, setMessages] = useState([]);
 
     const targetTextRef = useRef("");
@@ -210,6 +210,8 @@ export default function ChatPage() {
             ]);
 
             let finalUrl = '';
+
+            const reviewParams = `&enableReview=${isReviewEnabled}&maxReviewRetries=2`;
             try {
                 if (chatMode === 'EXPERT') {
                     const preRes = await fetch(`${baseUrlAPI}/api/crossrow/expert/preview?message=${encodeURIComponent(userText)}`, { headers: { 'Authorization': `Bearer ${token}` } });
@@ -220,8 +222,7 @@ export default function ChatPage() {
                             msg.id === aiMsgId ? { ...msg, systemLog: `[System Log]: Routing query to specialist [ ${expertName.toUpperCase()} ]` } : msg
                         ));
                     }
-                    finalUrl = `${baseUrlAPI}/api/crossrow/expert/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&token=${token}`;
-
+                    finalUrl = `${baseUrlAPI}/api/crossrow/expert/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&token=${token}${reviewParams}`;
                 } else if (chatMode === 'AUTO') {
                     const decisionRes = await fetch(`${baseUrlAPI}/api/crossrow/route/decision?message=${encodeURIComponent(userText)}`, { headers: { 'Authorization': `Bearer ${token}` } });
                     if(decisionRes.ok) {
@@ -246,8 +247,7 @@ export default function ChatPage() {
                 } else if (chatMode === 'PREFERRED') {
                     finalUrl = `${baseUrlAPI}/api/crossrow/chat/model/sse?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&model=${preferredModel}&token=${token}`;
                 } else {
-                    finalUrl = `${baseUrlAPI}/api/crossrow/agent/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&token=${token}`;
-                }
+                    finalUrl = `${baseUrlAPI}/api/crossrow/agent/chat?message=${encodeURIComponent(userText)}&chatId=${chatId}&userId=${userId}&token=${token}${reviewParams}`;                }
 
                 const eventSource = new EventSource(finalUrl);
                 eventSourceRef.current = eventSource;
@@ -351,6 +351,33 @@ export default function ChatPage() {
                     }
                 });
 
+                eventSource.addEventListener("review", (event) => {
+                    try {
+                        const dto = JSON.parse(event.data);
+                        setMessages(prev => prev.map(msg => {
+                            if (msg.id === aiMsgId) {
+                                const newMsg = { ...msg };
+                                const existingSteps = newMsg.steps || [];
+
+                                // 乐观更新替换机制：如果来的是 result，且上一个元素是 pending，就直接覆盖它
+                                const lastStepIndex = existingSteps.length - 1;
+                                if (dto.stepType === "review_result" && lastStepIndex >= 0 && existingSteps[lastStepIndex].stepType === "review_pending") {
+                                    const updatedSteps = [...existingSteps];
+                                    updatedSteps[lastStepIndex] = dto;
+                                    newMsg.steps = updatedSteps;
+                                } else {
+                                    // 否则直接追加
+                                    newMsg.steps = [...existingSteps, dto];
+                                }
+                                return newMsg;
+                            }
+                            return msg;
+                        }));
+                    } catch (parseError) {
+                        console.error("Failed to parse review event", parseError);
+                    }
+                });
+
                 eventSource.addEventListener("complete", () => { eventSource.close(); setIsSending(false); eventSourceRef.current = null; });
                 eventSource.addEventListener("error", (event) => {
                     try {
@@ -391,29 +418,39 @@ export default function ChatPage() {
 
     return (
         <div className="relative min-h-screen font-vn overflow-hidden flex">
-            {/* --- 核心修改：动态应用模糊与滤镜特效 --- */}
+            {/* ========================================== */}
+            {/* 核心重构：背景渲染层 (极致高清优化)          */}
+            {/* ========================================== */}
             <div className="absolute inset-0 z-0 bg-slate-900">
                 {bgUrl && (
                     <img
                         src={bgUrl}
                         alt="Background"
-                        // 如果开启特效，就应用 opacity-60 和降低亮度的滤镜；如果关闭，就显示清晰原图 (opacity-80 稍微防刺眼)
+                        // 强制浏览器使用最高质量的图像渲染算法，抗锯齿和像素拉伸优化
+                        style={{imageRendering: 'high-quality'}}
                         className={`w-full h-full object-cover transition-all duration-1000 animate-fade-in ${
-                            isBlurEnabled ? 'opacity-60 filter brightness-75 contrast-125' : 'opacity-80 filter-none'
+                            isBlurEnabled
+                                ? 'opacity-60 filter brightness-75 contrast-125'
+                                : 'opacity-100 filter-none' // 【核心修改】：100% 不透明度，完全剥离所有滤镜
                         }`}
                         onError={(e) => {
                             e.target.style.display = 'none';
                         }}
                     />
                 )}
-                {/* 如果开启特效，才渲染这层厚重的渐变毛玻璃 */}
+
+                {/* 1. Cinematic 模式：厚重的渐变毛玻璃，极客赛博风 */}
                 {isBlurEnabled && (
                     <div
                         className="absolute inset-0 bg-gradient-to-b from-slate-900/60 via-slate-900/40 to-slate-900/90 backdrop-blur-[1px]"/>
                 )}
-                {/* 即使关闭特效，也加一层极浅的黑色蒙版，保证白色的聊天文字能看清 */}
+
+                {/* 2. Clear Reality 模式：无边框高清体验 */}
                 {!isBlurEnabled && (
-                    <div className="absolute inset-0 bg-black/30"/>
+                    // 【核心修改】：去掉全屏黑罩！只在屏幕下半部分（输入框和最新文字处）打一层极其柔和的底部黑影，
+                    // 既保证了画面 100% 的通透锐利，又保证了白色聊天文字绝对能看清！
+                    <div
+                        className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent pointer-events-none"/>
                 )}
             </div>
 
@@ -481,24 +518,86 @@ export default function ChatPage() {
 
                     <div
                         className={`mt-4 pt-4 border-t transition-colors duration-500 w-full ${agentQuestion ? 'border-yellow-400/50' : inputBorder}`}>
+
+                        {/* 1. 第一行：系统提问（如果有，单独占一行并闪烁） */}
+                        {agentQuestion && (
+                            <div className="text-sm text-yellow-300 font-serif tracking-wide animate-pulse mb-2">
+                                [System]: Waiting for confirmation: "{agentQuestion}"
+                            </div>
+                        )}
+
+                        {/* 2. 第二行：左右控制台 */}
                         <div className="flex justify-between items-end mb-2 min-h-[24px]">
-                            <div>{agentQuestion && <div
-                                className="text-sm text-yellow-300 font-serif tracking-wide animate-pulse">[System]:
-                                Waiting for confirmation: "{agentQuestion}"</div>}</div>
-                            <button onClick={() => setChatModeIndex((prev) => (prev + 1) % MODES.length)}
-                                    disabled={isSending || agentQuestion}
-                                    className={`text-xs font-sans tracking-widest px-3 py-1 rounded transition-all duration-300 border ${modeStyle} ${isSending || agentQuestion ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+
+                            {/* 左侧：Review 开关 (仅在特定模式且没有提问时显示) */}
+                            <div>
+                                {(chatMode === 'AGENT' || chatMode === 'EXPERT') && !agentQuestion && (
+                                    <label className="flex items-center gap-2 cursor-pointer group w-fit">
+                                        <input
+                                            type="checkbox"
+                                            className="hidden"
+                                            checked={isReviewEnabled}
+                                            onChange={(e) => {
+                                                setIsReviewEnabled(e.target.checked);
+                                                localStorage.setItem('crossrow_enable_review', e.target.checked);
+                                            }}
+                                            disabled={isSending}
+                                        />
+
+                                        {/* 动态主题色的方块外框与发光 */}
+                                        <div
+                                            className={`w-3 h-3 border flex items-center justify-center transition-all duration-300 ${
+                                                isReviewEnabled
+                                                    ? (chatMode === 'AGENT'
+                                                        ? 'border-blue-500 bg-blue-500/20 shadow-[0_0_8px_rgba(59,130,246,0.4)]'
+                                                        : 'border-purple-500 bg-purple-500/20 shadow-[0_0_8px_rgba(168,85,247,0.4)]')
+                                                    : 'border-slate-600 bg-transparent group-hover:border-slate-400'
+                                            }`}>
+                                            {/* 动态主题色的内核芯 */}
+                                            {isReviewEnabled && (
+                                                <div
+                                                    className={`w-1.5 h-1.5 ${chatMode === 'AGENT' ? 'bg-blue-400' : 'bg-purple-400'}`}/>
+                                            )}
+                                        </div>
+
+                                        {/* 动态主题色的伴随文字 */}
+                                        <span
+                                            className={`text-xs font-sans tracking-widest uppercase transition-colors duration-300 ${
+                                                isReviewEnabled
+                                                    ? (chatMode === 'AGENT' ? 'text-blue-300' : 'text-purple-300')
+                                                    : 'text-slate-500 group-hover:text-slate-300'
+                                            }`}>
+                                            Enable Supervisor
+                                        </span>
+                                    </label>
+                                )}
+                            </div>
+
+                            {/* 右侧：模式切换按钮 */}
+                            <button
+                                onClick={() => setChatModeIndex((prev) => (prev + 1) % MODES.length)}
+                                disabled={isSending || agentQuestion}
+                                className={`text-xs font-sans tracking-widest px-3 py-1 rounded transition-all duration-300 border ${modeStyle} ${isSending || agentQuestion ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                            >
                                 {modeLabel}
                             </button>
                         </div>
+
+                        {/* 3. 第三行：真正的输入框主体 */}
                         <div className="flex items-center w-full">
                             <span
                                 className={`text-lg md:text-xl vn-text-shadow mr-2 font-bold transition-colors ${agentQuestion ? 'text-yellow-400' : inputArrow}`}>&gt;</span>
-                            <input type="text" value={input} onChange={(e) => setInput(e.target.value)}
-                                   onKeyDown={handleSend} autoFocus disabled={isSending || !chatId}
-                                   placeholder={isSending ? "Processing..." : (agentQuestion ? "Type your answer here..." : "Message...")}
-                                   className={`flex-1 w-full bg-transparent border-none outline-none text-lg md:text-xl text-white vn-text-shadow placeholder-white/20 font-vn leading-snug tracking-tight caret-transparent cursor-blink ${isSending ? 'opacity-50' : ''}`}
-                                   autoComplete="off"/>
+                            <input
+                                type="text"
+                                value={input}
+                                onChange={(e) => setInput(e.target.value)}
+                                onKeyDown={handleSend}
+                                autoFocus
+                                disabled={isSending || !chatId}
+                                placeholder={isSending ? "Processing..." : (agentQuestion ? "Type your answer here..." : "Message...")}
+                                className={`flex-1 w-full bg-transparent border-none outline-none text-lg md:text-xl text-white vn-text-shadow placeholder-white/20 font-vn leading-snug tracking-tight caret-transparent cursor-blink ${isSending ? 'opacity-50' : ''}`}
+                                autoComplete="off"
+                            />
                         </div>
                     </div>
                 </div>

@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Wrench, Terminal, Loader2, CheckCircle, XCircle } from 'lucide-react';
-
+import { ChevronDown, ChevronRight, Wrench, Terminal, Loader2, CheckCircle, XCircle, ShieldAlert, ShieldCheck } from 'lucide-react';
 // 专门用来渲染单个 Tool Call 并管理伪加载进度的子组件
 const ToolCallItem = ({ tool }) => {
     const [progress, setProgress] = useState(0);
@@ -103,8 +102,13 @@ export default function AgentTracePanel({ steps, tokenUsage }) {
                 <div className="p-4 space-y-6 text-slate-300">
                     {steps.map((step, idx) => (
                         <div key={idx} className="relative space-y-3 border-l-2 border-slate-600 pl-4 py-1">
-                            <div className="absolute -left-[5px] top-2 w-2 h-2 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.8)]"></div>
-                            <div className="text-xs text-slate-500 uppercase tracking-widest font-bold">Step {step.stepNumber}</div>
+                            {/* 常规 Step 的圆点 */}
+                            {step.stepNumber && step.stepType !== 'review_pending' && step.stepType !== 'review_result' && (
+                                <>
+                                    <div className="absolute -left-[5px] top-2 w-2 h-2 rounded-full bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.8)]"></div>
+                                    <div className="text-xs text-slate-500 uppercase tracking-widest font-bold">Step {step.stepNumber}</div>
+                                </>
+                            )}
 
                             {/* --- 极其显眼的思考过程展示 --- */}
                             {step.thinking && (
@@ -120,6 +124,23 @@ export default function AgentTracePanel({ steps, tokenUsage }) {
                             {step.toolCalls && step.toolCalls.map((tool, tIdx) => (
                                 <ToolCallItem key={tIdx} tool={tool} />
                             ))}
+
+                            {/* review agent工作*/}
+                            {step.stepType === 'review_result' && (
+                                <div className={`p-3 rounded-lg border space-y-2 mt-2 transition-all duration-300 ${
+                                    step.reviewApproved ? 'bg-green-950/20 border-green-500/30' : 'bg-orange-950/20 border-orange-500/50 shadow-[0_0_10px_rgba(249,115,22,0.1)]'
+                                }`}>
+                                    <div className="flex items-center gap-2 font-bold text-sm">
+                                        {step.reviewApproved ? <ShieldCheck size={16} className="text-green-400"/> : <ShieldAlert size={16} className="text-orange-400"/>}
+                                        <span className={step.reviewApproved ? 'text-green-400 tracking-wider' : 'text-orange-400 tracking-wider'}>
+                                            {step.reviewApproved ? '[SUPERVISOR]: APPROVED' : '[SUPERVISOR]: REJECTED - REWORK REQUIRED'}
+                                        </span>
+                                    </div>
+                                    <div className={`text-xs font-mono pl-6 ${step.reviewApproved ? 'text-green-500/70' : 'text-orange-300'}`}>
+                                        <span className="opacity-60">Reason: </span> {step.reviewReason}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     ))}
                 </div>
