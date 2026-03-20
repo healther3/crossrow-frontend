@@ -126,9 +126,22 @@ export default function SessionSidebar({
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (response.ok) {
-                const newSessionId = await response.text();
+                const rawText = await response.text();
+                let actualSessionId = rawText;
+
+                // 核心修复：尝试把后端返回的字符串当做 JSON 解析
+                try {
+                    const parsedData = JSON.parse(rawText);
+                    // 如果解析成功，且里面有 id 字段，就精准提取出 id
+                    if (parsedData && parsedData.id) {
+                        actualSessionId = parsedData.id;
+                    }
+                } catch (e) {
+                    // 解析失败说明后端返回的就是纯 UUID 字符串，保持原样即可
+                }
+
                 loadFolders();
-                onNewSession(newSessionId);
+                onNewSession(actualSessionId);
             }
         } catch (error) { console.error(error); }
     };

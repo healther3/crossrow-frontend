@@ -213,7 +213,7 @@ export default function ChatPage() {
 
             const reviewParams = `&enableReview=${isReviewEnabled}&maxReviewRetries=2`;
             try {
-                const actualId = chatId.id;
+                const actualId = chatId?.id || chatId;
                 if (chatMode === 'EXPERT') {
                     const preRes = await fetch(`${baseUrlAPI}/api/crossrow/expert/preview?message=${encodeURIComponent(userText)}`, { headers: { 'Authorization': `Bearer ${token}` } });
                     if(preRes.ok) {
@@ -395,7 +395,7 @@ export default function ChatPage() {
                         if (titleData && titleData.title) {
                             // 触发侧边栏的打字机动画
                             setDynamicTitleUpdate({
-                                id: chatId.id,
+                                id: chatId?.id || chatId,
                                 title: titleData.title
                             });
                         }
@@ -456,7 +456,7 @@ export default function ChatPage() {
             </div>
 
             <SessionSidebar isSidebarOpen={isSidebarOpen}
-                            currentChatId={chatId ? chatId.id : null}
+                            currentChatId={chatId?.id || chatId}
                             onSessionSelect={handleSessionSelect}
                             onNewSession={handleNewSession}
                             token={token}
