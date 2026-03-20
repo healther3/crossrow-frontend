@@ -7,6 +7,7 @@ import { Menu, Image as ImageIcon, X } from 'lucide-react';
 import SessionSidebar from '../components/SessionSidebar';
 import AgentTracePanel from '../components/AgentTracePanel';
 import ImageModal from '../components/ImageModal';
+import { fetchEventSource } from '@microsoft/fetch-event-source';
 
 const TYPE_SPEED_MS = 20;
 const CHARS_PER_TICK = 3;
@@ -229,85 +230,141 @@ export default function ChatPage() {
         setPendingImages(prev => prev.filter((_, i) => i !== index));
     };
 
+    // 处理图片上传：调用后端的内部上传接口，换取 GCS URL
+    async function uploadImages(files, userId, token) {
+        const formData = new FormData();
+
+        // 支持单个文件或多个文件
+        const fileArray = Array.isArray(files) ? files : [files];
+        fileArray.forEach(file => {
+            formData.append('files', file);
+        });
+        formData.append('userId', userId);
+
+        try{
+        const uploadRes = await fetch(`${baseUrlAPI}/api/media/image/upload`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            },
+            body: formData
+        });
+
+        if (!uploadRes.ok) {
+            throw new Error(`Failed to upload image: ${uploadRes.status}`);
+        }
+
+        // 返回格式: [{ type: "image", mimeType: "image/png", url: "https://storage.googleapis.com/..." }]
+        const mediaList = await uploadRes.json();
+        return mediaList;
+
+        } catch (error) {
+            console.error("Image upload error:", error);
+            throw error; // 抛出错误，让 handleSend 里的 try-catch 捕获并停止发送
+        }
+    }
     // 核心发送逻辑
+/// 核心发送逻辑
     const handleSend = async (e) => {
-        if (e.key === 'Enter' && input.trim() && !isSending && !e.nativeEvent.isComposing) {
+        // 【核心修改 1】：判断是否有内容（有文字 OR 有图片，都算有内容）
+        const hasContent = input.trim().length > 0 || pendingImages.length > 0;
+
+        // 将拦截条件中的 input.trim() 替换为 hasContent
+        if (e.key === 'Enter' && hasContent && !isSending && !e.nativeEvent.isComposing) {
             if (!chatId) return;
 
             setIsSending(true); setAgentQuestion(null);
             const userText = input.trim(); setInput('');
-            const userMsgId = Date.now(); const aiMsgId = userMsgId + 1;
+
+            const imagesToUpload = [...pendingImages];
+            setPendingImages([]);
+
+            const userMsgId = Date.now();
+            const aiMsgId = userMsgId + 1;
 
             currentMsgIdRef.current = aiMsgId; targetTextRef.current = ""; displayedIndexRef.current = 0; stepContentsRef.current.clear();
-            if (eventSourceRef.current) eventSourceRef.current.close();
+
+            // 清理上一个请求
+            if (eventSourceRef.current && typeof eventSourceRef.current.abort === 'function') {
+                eventSourceRef.current.abort();
+            }
+
+            // 【核心修改 2】：UI 体验优化
+            // 如果用户只发了图片没打字，前端聊天气泡里总得显示点什么，不然是个空气泡
+            const displayUserText = userText || (imagesToUpload.length > 0 ? "[Attached Visual Asset]" : "");
 
             setMessages(prev => [
                 ...prev,
-                { id: userMsgId, text: userText, sender: "user" },
-                { id: aiMsgId, text: "", sender: "ai", steps: [], tokenUsage: null }
+                { id: userMsgId, text: displayUserText, sender: "user" }, // 使用优化后的显示文本
+                {
+                    id: aiMsgId,
+                    text: "",
+                    sender: "ai",
+                    steps: [],
+                    tokenUsage: null,
+                    systemLog: imagesToUpload.length > 0 ? `[System Log]: Uploading ${imagesToUpload.length} visual asset(s) to secure storage...` : null
+                }
             ]);
 
+            const actualId = chatId?.id || chatId;
             let finalUrl = '';
 
-            const reviewParams = `&enableReview=${isReviewEnabled}&maxReviewRetries=2`;
+            // ... 下面的 try { ... } 逻辑保持完全不变
+
             try {
-                const actualId = chatId?.id || chatId;
+                // ==========================================
+                // 【阶段 1】：调用你的批量上传函数
+                // ==========================================
+                let mediaPayload = []; // 改用 let，方便直接赋值
+
+                if (imagesToUpload.length > 0) {
+                    // 直接一次性把所有图片发给你的上传函数
+                    mediaPayload = await uploadImages(imagesToUpload, userId, token);
+
+                    // 图片上传完毕，清空 systemLog 中的处理提示
+                    setMessages(prev => prev.map(msg => msg.id === aiMsgId ? { ...msg, systemLog: null } : msg));
+                }
+
+                // ==========================================
+                // 【阶段 2】：URL 路由构建 (全部统一为 POST 接口)
+                // ==========================================
                 if (chatMode === 'EXPERT') {
                     const preRes = await fetch(`${baseUrlAPI}/api/crossrow/expert/preview?message=${encodeURIComponent(userText)}`, { headers: { 'Authorization': `Bearer ${token}` } });
                     if(preRes.ok) {
                         const expertName = await preRes.text();
-                        // 【核心修改】：不增加新气泡，而是给当前的 AI 气泡加上 systemLog 属性
-                        setMessages(prev => prev.map(msg =>
-                            msg.id === aiMsgId ? { ...msg, systemLog: `[System Log]: Routing query to specialist [ ${expertName.toUpperCase()} ]` } : msg
-                        ));
+                        setMessages(prev => prev.map(msg => msg.id === aiMsgId ? { ...msg, systemLog: `[System Log]: Routing query to specialist [ ${expertName.toUpperCase()} ]` } : msg));
                     }
-                    finalUrl = `${baseUrlAPI}/api/crossrow/expert/chat?message=${encodeURIComponent(userText)}&chatId=${actualId}&userId=${userId}&token=${token}${reviewParams}`;
+                    finalUrl = `${baseUrlAPI}/api/crossrow/expert/chat?enableReview=${isReviewEnabled}&maxReviewRetries=2`;
                 } else if (chatMode === 'AUTO') {
                     const decisionRes = await fetch(`${baseUrlAPI}/api/crossrow/route/decision?message=${encodeURIComponent(userText)}`, { headers: { 'Authorization': `Bearer ${token}` } });
                     if(decisionRes.ok) {
                         const decision = await decisionRes.json();
-
-                        // 1. 精准解析你的 Java Record 字段
                         const model = decision.selectedModel || 'Optimal Framework';
                         const review = decision.review || {};
-                        const category = review.category || 'GENERAL';
-                        const isComplex = review.is_complex ? 'HIGH' : 'LOW';
-                        const reason = review.reason || 'Task Evaluated';
-
-
-                        // 2. 拼接成极具压迫感的赛博朋克风日志
-                        const traceLog = `[Auto-Selection Trace]: Category: [ ${category.toUpperCase()} ] | Complexity: [ ${isComplex} ] | Analysis: ${reason} | Deployed Core: [ ${model.toUpperCase()} ]`;
-
-                        setMessages(prev => prev.map(msg =>
-                            msg.id === aiMsgId ? { ...msg, systemLog: traceLog } : msg
-                        ));
+                        const traceLog = `[Auto-Selection Trace]: Category: [ ${(review.category || 'GENERAL').toUpperCase()} ] | Complexity: [ ${review.is_complex ? 'HIGH' : 'LOW'} ] | Analysis: ${review.reason || 'Task Evaluated'} | Deployed Core: [ ${model.toUpperCase()} ]`;
+                        setMessages(prev => prev.map(msg => msg.id === aiMsgId ? { ...msg, systemLog: traceLog } : msg));
                     }
-                    finalUrl = `${baseUrlAPI}/api/crossrow/chat/auto-route/sse?message=${encodeURIComponent(userText)}&chatId=${actualId}&userId=${userId}&token=${token}`;
+                    finalUrl = `${baseUrlAPI}/api/crossrow/chat/auto-route/sse`;
                 } else if (chatMode === 'PREFERRED') {
-                    finalUrl = `${baseUrlAPI}/api/crossrow/chat/model/sse?message=${encodeURIComponent(userText)}&chatId=${actualId}&userId=${userId}&model=${preferredModel}&token=${token}`;
+                    finalUrl = `${baseUrlAPI}/api/crossrow/chat/multimodal/sse`;
                 } else {
-                    finalUrl = `${baseUrlAPI}/api/crossrow/agent/chat?message=${encodeURIComponent(userText)}&chatId=${actualId}&userId=${userId}&token=${token}${reviewParams}`;                }
+                    finalUrl = `${baseUrlAPI}/api/crossrow/agent/chat/multimodal?enableReview=${isReviewEnabled}&maxReviewRetries=2`;
+                }
 
-                const eventSource = new EventSource(finalUrl);
-                eventSourceRef.current = eventSource;
-
-                // --- 终极防御：使用 Set 确保弹窗只触发一次 ---
+                // ==========================================
+                // 【阶段 3】：统一的事件处理函数抽象
+                // ==========================================
                 let chunkCounter = 0;
                 const processedImageUrls = new Set();
                 const processedQuestions = new Set();
 
-                // 在拼接完整的长字符串上执行解析，防止流式切片导致正则失效
                 const processDataWithHiddenActions = (fullText) => {
                     let cleanedData = fullText;
-
                     const actionRegex = /<hidden_action\s+type=['"]show_image['"]\s+url=['"](.*?)['"]\s*\/>/gi;
                     let match;
                     while ((match = actionRegex.exec(cleanedData)) !== null) {
                         const gcsUrl = match[1];
-                        if (!processedImageUrls.has(gcsUrl)) {
-                            processedImageUrls.add(gcsUrl);
-                            setTimeout(() => { setModalImage(gcsUrl); }, 800);
-                        }
+                        if (!processedImageUrls.has(gcsUrl)) { processedImageUrls.add(gcsUrl); setTimeout(() => { setModalImage(gcsUrl); }, 800); }
                     }
                     cleanedData = cleanedData.replace(actionRegex, '');
 
@@ -315,51 +372,28 @@ export default function ChatPage() {
                     let askMatch;
                     while ((askMatch = askRegex.exec(cleanedData)) !== null) {
                         const questionText = askMatch[1];
-                        if (!processedQuestions.has(questionText)) {
-                            processedQuestions.add(questionText);
-                            setTimeout(() => { setAgentQuestion(questionText); }, 500);
-                        }
+                        if (!processedQuestions.has(questionText)) { processedQuestions.add(questionText); setTimeout(() => { setAgentQuestion(questionText); }, 500); }
                     }
                     cleanedData = cleanedData.replace(askRegex, '');
                     cleanedData = cleanedData.replace('(Waiting for user input...)', '');
                     return cleanedData;
                 };
 
-                // 专门处理原始纯文本流 (比如模型直接返回的画图标签)
                 const handleRawData = (data) => {
                     let cleanedData = data;
-                    if (cleanedData.startsWith('"') && cleanedData.endsWith('"')) {
-                        try { cleanedData = JSON.parse(cleanedData); } catch(e) {}
-                    }
+                    if (cleanedData.startsWith('"') && cleanedData.endsWith('"')) { try { cleanedData = JSON.parse(cleanedData); } catch(e) {} }
                     stepContentsRef.current.set(chunkCounter++, cleanedData);
-
                     const fullRawText = Array.from(stepContentsRef.current.entries()).sort((a, b) => Number(a[0]) - Number(b[0])).map(([_, content]) => content).join("");
                     targetTextRef.current = processDataWithHiddenActions(fullRawText.replace(/\\n/g, '\n'));
                 };
 
-                // 通道 1：捕获匿名事件 (Flux 返回的纯文本流)
-                eventSource.onmessage = (event) => {
-                    handleRawData(event.data);
-                };
-
-                // 通道 2：捕获命名事件 (Agent 返回的 JSON DTO)
-                eventSource.addEventListener("step", (event) => {
+                const handleStep = (data) => {
                     try {
-                        const dto = JSON.parse(event.data);
+                        const dto = JSON.parse(data);
                         if (dto && (dto.stepType || dto.stepNumber !== undefined)) {
-
-                            // ==========================================
-                            // 【核心修复】：拦截并解析工具调用结果中的隐藏标签！
-                            // ==========================================
                             if (dto.toolCalls && Array.isArray(dto.toolCalls)) {
-                                dto.toolCalls.forEach(tool => {
-                                    if (tool.result && typeof tool.result === 'string') {
-                                        // 扫描工具的结果，触发图片弹窗，并把标签从文本中抹除
-                                        tool.result = processDataWithHiddenActions(tool.result);
-                                    }
-                                });
+                                dto.toolCalls.forEach(tool => { if (tool.result && typeof tool.result === 'string') { tool.result = processDataWithHiddenActions(tool.result); } });
                             }
-
                             setMessages(prev => prev.map(msg => {
                                 if (msg.id === aiMsgId) {
                                     const newMsg = { ...msg };
@@ -369,83 +403,84 @@ export default function ChatPage() {
                                     } else {
                                         const existingSteps = newMsg.steps || [];
                                         const stepIndex = existingSteps.findIndex(s => s.stepNumber === dto.stepNumber);
-
                                         if (stepIndex !== -1) {
-                                            const updatedSteps = [...existingSteps];
-                                            updatedSteps[stepIndex] = dto;
-                                            newMsg.steps = updatedSteps;
-                                        } else {
-                                            newMsg.steps = [...existingSteps, dto];
-                                        }
+                                            const updatedSteps = [...existingSteps]; updatedSteps[stepIndex] = dto; newMsg.steps = updatedSteps;
+                                        } else { newMsg.steps = [...existingSteps, dto]; }
                                     }
                                     return newMsg;
                                 }
                                 return msg;
                             }));
-                        } else {
-                            handleRawData(event.data);
-                        }
-                    } catch (parseError) {
-                        handleRawData(event.data);
-                    }
-                });
+                        } else { handleRawData(data); }
+                    } catch (e) { handleRawData(data); }
+                };
 
-                eventSource.addEventListener("review", (event) => {
+                const handleReview = (data) => {
                     try {
-                        const dto = JSON.parse(event.data);
+                        const dto = JSON.parse(data);
                         setMessages(prev => prev.map(msg => {
                             if (msg.id === aiMsgId) {
                                 const newMsg = { ...msg };
                                 const existingSteps = newMsg.steps || [];
-
-                                // 乐观更新替换机制：如果来的是 result，且上一个元素是 pending，就直接覆盖它
                                 const lastStepIndex = existingSteps.length - 1;
                                 if (dto.stepType === "review_result" && lastStepIndex >= 0 && existingSteps[lastStepIndex].stepType === "review_pending") {
-                                    const updatedSteps = [...existingSteps];
-                                    updatedSteps[lastStepIndex] = dto;
-                                    newMsg.steps = updatedSteps;
-                                } else {
-                                    // 否则直接追加
-                                    newMsg.steps = [...existingSteps, dto];
-                                }
+                                    const updatedSteps = [...existingSteps]; updatedSteps[lastStepIndex] = dto; newMsg.steps = updatedSteps;
+                                } else { newMsg.steps = [...existingSteps, dto]; }
                                 return newMsg;
                             }
                             return msg;
                         }));
-                    } catch (parseError) {
-                        console.error("Failed to parse review event", parseError);
-                    }
-                });
+                    } catch (e) { console.error(e); }
+                };
 
-                eventSource.addEventListener("complete", () => { eventSource.close(); setIsSending(false); eventSourceRef.current = null; });
-                eventSource.addEventListener("error", (event) => {
+                const handleTitle = (data) => {
                     try {
-                        const errDto = JSON.parse(event.data);
-                        setMessages(prev => [...prev, { id: Date.now(), text: `[System Error]: ${errDto.message || 'Unknown error'}`, sender: "system" }]);
-                    } catch (e) {}
-                    eventSource.close(); setIsSending(false); eventSourceRef.current = null;
-                });
-                // 【新增】：监听后端异步生成的标题事件
-                eventSource.addEventListener("session_title", (event) => {
-                    try {
-                        // 假设后端传过来的是: {"title": "人工智能的哲学意义"}
-                        const titleData = JSON.parse(event.data);
-                        if (titleData && titleData.title) {
-                            // 触发侧边栏的打字机动画
-                            setDynamicTitleUpdate({
-                                id: chatId?.id || chatId,
-                                title: titleData.title
-                            });
+                        const titleData = JSON.parse(data);
+                        if (titleData && titleData.title) setDynamicTitleUpdate({ id: actualId, title: titleData.title });
+                    } catch (e) { console.error(e); }
+                };
+
+                // ==========================================
+                // 【阶段 4】：统一使用 fetchEventSource 发起 POST
+                // ==========================================
+                const ctrl = new AbortController();
+                eventSourceRef.current = ctrl;
+
+                await fetchEventSource(finalUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    // 完美对应后端的 MultimodalChatRequestDTO 结构
+                    body: JSON.stringify({
+                        message: userText || (mediaPayload.length > 0 ? "Please analyze the attached image." : ""),
+                        media: mediaPayload.length > 0 ? mediaPayload : null, // 如果没图，传 null 或 []，后端会自动降级
+                        chatId: actualId,
+                        userId: userId
+                    }),
+                    signal: ctrl.signal,
+                    onmessage(ev) {
+                        if (ev.event === 'step') handleStep(ev.data);
+                        else if (ev.event === 'review') handleReview(ev.data);
+                        else if (ev.event === 'session_title') handleTitle(ev.data);
+                        else if (ev.event === 'complete') setIsSending(false);
+                        else if (ev.event === 'error') {
+                            try { const errDto = JSON.parse(ev.data); setMessages(prev => [...prev, { id: Date.now(), text: `[System Error]: ${errDto.message}`, sender: "system" }]); } catch(e){}
+                            ctrl.abort(); setIsSending(false);
                         }
-                    } catch (e) {
-                        console.error("Failed to parse dynamic title", e);
-                    }
+                        else handleRawData(ev.data);
+                    },
+                    onclose() { setIsSending(false); },
+                    onerror(err) { setIsSending(false); throw err; }
                 });
 
-            } catch (err) { setIsSending(false); }
+            } catch (err) {
+                setIsSending(false);
+                console.error(err);
+            }
         }
     };
-
     // UI 颜色计算
     let modeLabel = ''; let modeStyle = ''; let inputBorder = ''; let inputArrow = '';
     switch(chatMode) {
