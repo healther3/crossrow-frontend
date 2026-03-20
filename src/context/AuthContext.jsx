@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 const AuthContext = createContext();
 
@@ -17,10 +17,52 @@ export function AuthProvider({ children }) {
         }
     }, [token, userId]);
 
+    // 【新增】：使用 useCallback 包裹 logout，确保函数引用稳定
+    const logout = useCallback(() => {
+        setToken(null);
+        setUserId(null);
+    }, []);
+
+    // ==========================================
+    // 【核心新增】：全局 Fetch 拦截器 (被动防线)
+    // ==========================================
+    useEffect(() => {
+        // 1. 备份浏览器原生的 fetch 方法
+        const originalFetch = window.fetch;
+
+        // 2. 覆盖全局 fetch
+        window.fetch = async (...args) => {
+            try {
+                // 照常发起网络请求
+                const response = await originalFetch(...args);
+
+                // 如果后端返回 401 凭证过期/无效
+                if (response.status === 401) {
+                    // 获取请求的 URL，排除掉登录和注册接口（避免密码错误时也触发）
+                    const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+                    if (!url.includes('/api/auth/login') && !url.includes('/api/auth/register')) {
+                        console.warn('[Security] Token expired or invalid. Kicking to login...');
+                        // 触发登出，清空 Token
+                        logout();
+                        // 注：触发 logout 后，isAuthenticated 瞬间变为 false，
+                        // 外层的 <PrivateRoute> 会自动接管，将页面重定向到 /login
+                    }
+                }
+                return response;
+            } catch (error) {
+                throw error;
+            }
+        };
+
+        // 3. 组件卸载时恢复原生的 fetch（良好的清理习惯）
+        return () => {
+            window.fetch = originalFetch;
+        };
+    }, [logout]);
+
     // 登录方法
     const login = async (username, password) => {
-        // 请根据你的后端实际前缀调整，这里假设带有 /api 前缀
-        const response = await fetch('http://localhost:8123/api/auth/login', {
+        const response = await originalFetchOrFetch('http://localhost:8123/api/auth/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
@@ -32,16 +74,16 @@ export function AuthProvider({ children }) {
         }
 
         const data = await response.json();
-        // 假设你的 AuthResponse 包含 token 和 userId/username
         setToken(data.token);
-        // 如果后端返回了 id 就用 id，否则暂时用 username 作为标识
         setUserId(data.userId || username);
         return data;
     };
 
-    // 注册方法
+    // 此处单独为 login/register 提供无拦截的调用方式，避免被循环劫持，更稳妥
+    const originalFetchOrFetch = window.fetch;
+
     const register = async (username, password) => {
-        const response = await fetch('http://localhost:8123/api/auth/register', {
+        const response = await originalFetchOrFetch('http://localhost:8123/api/auth/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
@@ -52,12 +94,6 @@ export function AuthProvider({ children }) {
             throw new Error(errorText || 'Registration failed');
         }
         return await response.text();
-    };
-
-    // 登出方法
-    const logout = () => {
-        setToken(null);
-        setUserId(null);
     };
 
     return (
