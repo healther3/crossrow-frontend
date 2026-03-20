@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSettings } from '../context/SettingsContext';
 import { useTransition } from '../context/TransitionContext';
 import { useAuth } from '../context/AuthContext';
-import { Menu } from 'lucide-react';
+import { Menu, Image as ImageIcon, X } from 'lucide-react';
 
 import SessionSidebar from '../components/SessionSidebar';
 import AgentTracePanel from '../components/AgentTracePanel';
@@ -24,6 +24,9 @@ export default function ChatPage() {
     const [chatModeIndex, setChatModeIndex] = useState(0);
     const chatMode = MODES[chatModeIndex];
     const [preferredModel, setPreferredModel] = useState('STANDARD');
+
+    const [pendingImages, setPendingImages] = useState([]); // 存放准备发送的图片文件
+    const fileInputRef = useRef(null); // 指向隐藏的文件选择框
 
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [chatId, setChatId] = useState(null);
@@ -190,6 +193,41 @@ export default function ChatPage() {
         }, TYPE_SPEED_MS);
         return () => clearInterval(timer);
     }, []);
+
+    // 【新增】：处理本地图片选择
+    const handleImageSelect = (e) => {
+        if (e.target.files && e.target.files.length > 0) {
+            const filesArray = Array.from(e.target.files);
+            setPendingImages(prev => [...prev, ...filesArray]);
+        }
+        // 重置 input，允许重复选择同一张图
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
+    // 【新增】：处理 Ctrl+V 剪贴板粘贴图片
+    const handlePaste = (e) => {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+
+        const newImages = [];
+        for (let i = 0; i < items.length; i++) {
+            // 如果粘贴的是图片
+            if (items[i].type.startsWith('image/')) {
+                const file = items[i].getAsFile();
+                if (file) newImages.push(file);
+            }
+        }
+
+        if (newImages.length > 0) {
+            setPendingImages(prev => [...prev, ...newImages]);
+            // 如果纯粹是为了粘图片，可以选择不阻止默认事件，这样如果同时粘贴了图文，文字也能进输入框
+        }
+    };
+
+    // 【新增】：移除不想发送的图片
+    const removePendingImage = (index) => {
+        setPendingImages(prev => prev.filter((_, i) => i !== index));
+    };
 
     // 核心发送逻辑
     const handleSend = async (e) => {
@@ -584,17 +622,59 @@ export default function ChatPage() {
                             </button>
                         </div>
 
+                        {/* 【新增】：准备发送的图片预览区 */}
+                        {pendingImages.length > 0 && (
+                            <div className="flex gap-3 mb-3 p-3 bg-black/20 rounded-xl overflow-x-auto custom-scrollbar border border-white/5 shadow-inner">
+                                {pendingImages.map((file, idx) => (
+                                    <div key={idx} className="relative shrink-0 w-20 h-20 rounded-lg border border-white/10 overflow-hidden group shadow-lg">
+                                        <img
+                                            src={URL.createObjectURL(file)}
+                                            alt="preview"
+                                            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
+                                        />
+                                        <button
+                                            onClick={() => removePendingImage(idx)}
+                                            className="absolute top-1 right-1 bg-red-500/80 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer hover:bg-red-500"
+                                            title="Remove image"
+                                        >
+                                            <X size={12} />
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
                         {/* 3. 第三行：真正的输入框主体 */}
-                        <div className="flex items-center w-full">
+                        <div className="flex items-center w-full bg-black/10 rounded-xl px-2 py-1">
+                            {/* 【新增】：图片选择按钮与隐藏的文件输入框 */}
+                            <button
+                                onClick={() => fileInputRef.current?.click()}
+                                disabled={isSending || !chatId || agentQuestion}
+                                className={`p-2 text-slate-400 hover:text-cyan-400 transition-colors ${isSending || !chatId || agentQuestion ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-white/5 rounded-lg'}`}
+                                title="Upload Image"
+                            >
+                                <ImageIcon size={22} />
+                            </button>
+                            <input
+                                type="file"
+                                multiple
+                                accept="image/*"
+                                className="hidden"
+                                ref={fileInputRef}
+                                onChange={handleImageSelect}
+                            />
+
+                            {/* 原有的输入框，增加了 onPaste 监听 */}
                             <input
                                 type="text"
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
                                 onKeyDown={handleSend}
+                                onPaste={handlePaste}
                                 autoFocus
                                 disabled={isSending || !chatId}
-                                placeholder={isSending ? "Processing..." : (agentQuestion ? "Type your answer here..." : "Message...")}
-                                className={`flex-1 w-full bg-transparent border-none outline-none text-lg md:text-xl text-white vn-text-shadow placeholder-white/20 font-vn leading-snug tracking-tight caret-transparent cursor-blink ${isSending ? 'opacity-50' : ''}`}
+                                placeholder={!chatId ? "Select or create a session from the left..." : isSending ? "Processing..." : (agentQuestion ? "Type your answer here..." : "Message...")}
+                                className={`flex-1 w-full bg-transparent border-none outline-none text-lg md:text-xl text-white vn-text-shadow placeholder-white/20 font-vn leading-snug tracking-tight caret-transparent cursor-blink px-2 ${(!chatId || isSending) ? 'opacity-50 cursor-not-allowed' : ''}`}
                                 autoComplete="off"
                             />
                         </div>
