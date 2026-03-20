@@ -134,8 +134,8 @@ export default function SessionSidebar({
     const handleCreateSession = async (folderId = null) => {
         try {
             const url = folderId
-                ? `${baseUrlAPI}/api/sessions?title=New Conversation&folderId=${folderId}`
-                : `${baseUrlAPI}/api/sessions?title=New Conversation`;
+                ? `${baseUrlAPI}/api/sessions?folderId=${folderId}`
+                : `${baseUrlAPI}/api/sessions`;
 
             const response = await fetch(url, {
                 method: 'POST',

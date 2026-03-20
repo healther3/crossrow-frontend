@@ -94,8 +94,19 @@ export default function ChatPage() {
 
     // 侧边栏回调
     const handleSessionSelect = (selectedId) => {
-        if (chatId === selectedId) return;
-        if (eventSourceRef.current) { eventSourceRef.current.close(); eventSourceRef.current = null; }
+        const actualCurrentId = chatId?.id || chatId;
+        if (actualCurrentId === selectedId) return;
+
+        // 【核心修复 1】：安全清理旧请求，兼容 EventSource 和 AbortController
+        if (eventSourceRef.current) {
+            if (typeof eventSourceRef.current.abort === 'function') {
+                eventSourceRef.current.abort();
+            } else if (typeof eventSourceRef.current.close === 'function') {
+                eventSourceRef.current.close();
+            }
+            eventSourceRef.current = null;
+        }
+
         setIsSending(false); setAgentQuestion(null); currentMsgIdRef.current = null; targetTextRef.current = ""; displayedIndexRef.current = 0; stepContentsRef.current.clear();
 
         setChatId(selectedId);
@@ -104,7 +115,16 @@ export default function ChatPage() {
     };
 
     const handleNewSession = (newId) => {
-        if (eventSourceRef.current) { eventSourceRef.current.close(); eventSourceRef.current = null; }
+        // 【核心修复 1】：同样加入安全清理机制
+        if (eventSourceRef.current) {
+            if (typeof eventSourceRef.current.abort === 'function') {
+                eventSourceRef.current.abort();
+            } else if (typeof eventSourceRef.current.close === 'function') {
+                eventSourceRef.current.close();
+            }
+            eventSourceRef.current = null;
+        }
+
         setIsSending(false); setAgentQuestion(null); currentMsgIdRef.current = null; targetTextRef.current = ""; displayedIndexRef.current = 0; stepContentsRef.current.clear();
 
         setChatId(newId);
@@ -326,8 +346,9 @@ export default function ChatPage() {
                 }
 
                 // ==========================================
-                // 【阶段 2】：URL 路由构建 (全部统一为 POST 接口)
+                // 【阶段 2】：URL 路由构建 (优化分流)
                 // ==========================================
+
                 if (chatMode === 'EXPERT') {
                     const preRes = await fetch(`${baseUrlAPI}/api/crossrow/expert/preview?message=${encodeURIComponent(userText)}`, { headers: { 'Authorization': `Bearer ${token}` } });
                     if(preRes.ok) {
@@ -346,8 +367,10 @@ export default function ChatPage() {
                     }
                     finalUrl = `${baseUrlAPI}/api/crossrow/chat/auto-route/sse`;
                 } else if (chatMode === 'PREFERRED') {
+                    // 统一使用多模态对话接口，后端会自动做降级处理
                     finalUrl = `${baseUrlAPI}/api/crossrow/chat/multimodal/sse`;
                 } else {
+                    // AGENT 模式：统一使用多模态对话接口，后端会自动做降级处理
                     finalUrl = `${baseUrlAPI}/api/crossrow/agent/chat/multimodal?enableReview=${isReviewEnabled}&maxReviewRetries=2`;
                 }
 
@@ -436,8 +459,12 @@ export default function ChatPage() {
                 const handleTitle = (data) => {
                     try {
                         const titleData = JSON.parse(data);
-                        if (titleData && titleData.title) setDynamicTitleUpdate({ id: actualId, title: titleData.title });
-                    } catch (e) { console.error(e); }
+                        // 优先使用后端传回的 chatId，如果不存在则回退到当前页面的 actualId
+                        const targetId = titleData.chatId || actualId;
+                        if (titleData && titleData.title) {
+                            setDynamicTitleUpdate({ id: targetId, title: titleData.title });
+                        }
+                    } catch (e) { console.error("Title sync error:", e); }
                 };
 
                 // ==========================================
@@ -461,15 +488,35 @@ export default function ChatPage() {
                     }),
                     signal: ctrl.signal,
                     onmessage(ev) {
+                        // 调试：打印每一个到达的事件，无论名称是什么
+                        console.log(`[Raw SSE]: event=${ev.event || 'message'} data=${ev.data}`);
+
                         if (ev.event === 'step') handleStep(ev.data);
                         else if (ev.event === 'review') handleReview(ev.data);
-                        else if (ev.event === 'session_title') handleTitle(ev.data);
+                        else if (ev.event === 'session_title') {
+                            handleTitle(ev.data);
+                        }
                         else if (ev.event === 'complete') setIsSending(false);
                         else if (ev.event === 'error') {
                             try { const errDto = JSON.parse(ev.data); setMessages(prev => [...prev, { id: Date.now(), text: `[System Error]: ${errDto.message}`, sender: "system" }]); } catch(e){}
                             ctrl.abort(); setIsSending(false);
                         }
-                        else handleRawData(ev.data);
+                        else {
+                            // 兜底逻辑：如果是一个没有名字的 message 事件，但数据里包含了 title，说明是后端没传 event 名字
+                            if (!ev.event || ev.event === 'message') {
+                                try {
+                                    const json = JSON.parse(ev.data);
+                                    if (json && json.title && json.chatId) {
+                                        console.log("[Detected Title in Message Event]");
+                                        handleTitle(ev.data);
+                                        return; // 处理完标题后直接返回，不要当做普通聊天文字处理
+                                    }
+                                } catch (e) {
+                                    // 不是 JSON 或者不含标题，按原样处理
+                                }
+                            }
+                            handleRawData(ev.data);
+                        }
                     },
                     onclose() { setIsSending(false); },
                     onerror(err) { setIsSending(false); throw err; }
