@@ -19,6 +19,9 @@ export default function SessionSidebar({
     const [folderToDelete, setFolderToDelete] = useState(null);
     const [typingTitle, setTypingTitle] = useState(null);
 
+    const [editingFolderId, setEditingFolderId] = useState(null);
+    const [editingFolderName, setEditingFolderName] = useState("");
+
     // 1. 初始化加载
     const loadFolders = async () => {
         if (!token) return;
@@ -89,11 +92,24 @@ export default function SessionSidebar({
         } catch (e) { console.error(e); }
     };
 
-    const handleRenameFolder = async (folderId, currentName) => {
-        const name = window.prompt("Rename folder:", currentName);
-        if (!name || !name.trim() || name === currentName) return;
+    const startRenameFolder = (e, folderId, currentName) => {
+        e.stopPropagation(); // 阻止事件冒泡，防止文件夹折叠/展开
+        setEditingFolderId(folderId);
+        setEditingFolderName(currentName);
+    };
+
+    const submitRenameFolder = async (folderId) => {
+        const name = editingFolderName.trim();
+        const currentFolder = folders.find(f => f.id === folderId);
+
+        // 无论成功与否，先关闭编辑状态
+        setEditingFolderId(null);
+
+        // 如果名字没变或者为空，直接取消，不发请求
+        if (!name || name === currentFolder.name) return;
+
         try {
-            const res = await fetch(`${baseUrlAPI}/api/folders/${folderId}/name?name=${encodeURIComponent(name.trim())}`, {
+            const res = await fetch(`${baseUrlAPI}/api/folders/${folderId}/name?name=${encodeURIComponent(name)}`, {
                 method: 'PUT',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -238,9 +254,25 @@ export default function SessionSidebar({
                                         onClick={() => toggleFolder(folder.id)}
                                     >
                                         {isExpanded ? <FolderOpen size={16} className="text-cyan-600/80 shrink-0" /> : <Folder size={16} className="text-cyan-800/80 shrink-0" />}
-                                        <span className="font-sans text-xs font-bold tracking-wider uppercase truncate">
+                                        {editingFolderId === folder.id ? (
+                                            <input
+                                                type="text"
+                                                value={editingFolderName}
+                                                autoFocus
+                                                onClick={(e) => e.stopPropagation()} // 阻止点击输入框时触发文件夹展开
+                                                onChange={(e) => setEditingFolderName(e.target.value)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') submitRenameFolder(folder.id);
+                                                    if (e.key === 'Escape') setEditingFolderId(null); // 按 Esc 取消
+                                                }}
+                                                onBlur={() => submitRenameFolder(folder.id)} // 鼠标点到别处时自动保存
+                                                className="bg-slate-900 text-cyan-400 border border-cyan-500/50 rounded px-1.5 py-0.5 w-full text-xs font-sans font-bold tracking-wider uppercase outline-none focus:ring-1 focus:ring-cyan-400 shadow-inner"
+                                            />
+                                        ) : (
+                                            <span className="font-sans text-xs font-bold tracking-wider uppercase truncate">
                                             {folder.name}
-                                        </span>
+                                            </span>
+                                        )}
                                     </div>
 
                                     {folderToDelete === folder.id ? (
@@ -254,7 +286,10 @@ export default function SessionSidebar({
                                             <button onClick={() => handleCreateSession(folder.id)} className="p-1 hover:text-cyan-400 transition-colors cursor-pointer" title="New Chat Here"><Plus size={14} /></button>
                                             {!folder.isDefault && (
                                                 <>
-                                                    <button onClick={() => handleRenameFolder(folder.id, folder.name)} className="p-1 hover:text-blue-400 transition-colors cursor-pointer" title="Rename"><Edit2 size={12} /></button>
+                                                    <button
+                                                        onClick={(e) => startRenameFolder(e, folder.id, folder.name)}
+                                                        className="p-1 hover:text-blue-400 transition-colors cursor-pointer"
+                                                        title="Rename"><Edit2 size={12}/></button>
                                                     <button onClick={(e) => { e.stopPropagation(); setFolderToDelete(folder.id); }} className="p-1 hover:text-red-400 transition-colors cursor-pointer" title="Delete"><Trash2 size={12} /></button>
                                                 </>
                                             )}
