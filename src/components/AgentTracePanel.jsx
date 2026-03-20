@@ -133,20 +133,33 @@ export default function AgentTracePanel({ steps, tokenUsage }) {
                                 <ToolCallItem key={tIdx} tool={tool} />
                             ))}
 
-                            {/* review agent工作*/}
+                            {/* 渲染 Review 结果 */}
                             {step.stepType === 'review_result' && (
-                                <div className={`p-3 rounded-lg border space-y-2 mt-2 transition-all duration-300 ${
-                                    step.reviewApproved ? 'bg-green-950/20 border-green-500/30' : 'bg-orange-950/20 border-orange-500/50 shadow-[0_0_10px_rgba(249,115,22,0.1)]'
+                                <div className={`p-3 rounded-lg border mt-2 group transition-all duration-300 ${
+                                    step.approved
+                                        ? 'bg-green-950/20 border-green-500/30'
+                                        : 'bg-red-950/20 border-red-500/30 shadow-[0_0_15px_rgba(239,68,68,0.1)]'
                                 }`}>
-                                    <div className="flex items-center gap-2 font-bold text-sm">
-                                        {step.reviewApproved ? <ShieldCheck size={16} className="text-green-400"/> : <ShieldAlert size={16} className="text-orange-400"/>}
-                                        <span className={step.reviewApproved ? 'text-green-400 tracking-wider' : 'text-orange-400 tracking-wider'}>
-                                            {step.reviewApproved ? '[SUPERVISOR]: APPROVED' : '[SUPERVISOR]: REJECTED - REWORK REQUIRED'}
-                                        </span>
+                                    {/* 头部状态：APPROVED / REJECTED */}
+                                    <div className={`font-bold flex items-center gap-2 text-sm ${
+                                        step.approved ? 'text-green-400' : 'text-red-400'
+                                    }`}>
+                                        {step.approved ? <CheckCircle size={16} /> : <XCircle size={16} />}
+                                        <span className="tracking-wider uppercase">
+                            [SUPERVISOR]: {step.approved ? 'APPROVED' : 'REJECTED'}
+                        </span>
                                     </div>
-                                    <div className={`text-xs font-mono pl-6 ${step.reviewApproved ? 'text-green-500/70' : 'text-orange-300'}`}>
-                                        <span className="opacity-60">Reason: </span> {step.reviewReason}
-                                    </div>
+
+                                    {/* 核心修复：独立渲染 reason 模块，不再受限于 approved 状态 */}
+                                    {step.reason && (
+                                        <div className={`text-xs mt-3 ml-6 p-3 rounded-md font-mono border ${
+                                            step.approved
+                                                ? 'bg-green-950/10 border-green-500/20 text-green-400/80'
+                                                : 'bg-red-950/20 border-red-500/30 text-red-400/90'
+                                        }`}>
+                                            <span className="opacity-60">Reason: </span> {step.reason}
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>

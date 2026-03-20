@@ -8,6 +8,7 @@ import SessionSidebar from '../components/SessionSidebar';
 import AgentTracePanel from '../components/AgentTracePanel';
 import ImageModal from '../components/ImageModal';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
+import { useNavigate } from 'react-router-dom';
 
 const TYPE_SPEED_MS = 20;
 const CHARS_PER_TICK = 3;
@@ -592,14 +593,13 @@ export default function ChatPage() {
                     {/* --- 新增：右上角导航按钮组 --- */}
                     <div className="flex items-center gap-6">
                         <button
-                            // 注意：这里的 '/options' 请确保和你路由文件中配置页面的路径一致，如果是 '/config' 请自行修改
-                            onClick={() => navigateWithTransition('/options')}
+                            onClick={() => navigate('/options')} // 【核心修改】：绕过动画直接路由
                             className="text-white/40 hover:text-white vn-text-shadow text-sm transition-colors cursor-pointer font-sans tracking-widest uppercase"
                         >
                             [ CONFIG ]
                         </button>
                         <button
-                            onClick={() => navigateWithTransition('/')}
+                            onClick={() => navigate('/')} // 【核心修改】：绕过动画直接路由
                             className="text-white/40 hover:text-white vn-text-shadow text-sm transition-colors cursor-pointer font-sans tracking-widest uppercase"
                         >
                             [ RETURN ]
